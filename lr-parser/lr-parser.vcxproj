@@ -125,10 +125,13 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="demo.cpp" />
-    <ClCompile Include="parser.cpp" />
+    <ClCompile Include="lr_parser.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="lr_parser.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="gram_exp01.txt" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

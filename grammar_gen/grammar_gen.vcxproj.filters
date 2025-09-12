@@ -21,5 +21,6 @@
   </ItemGroup>
   <ItemGroup>
     <Text Include="grammar_example.txt" />
+    <Text Include="gram_exp01.txt" />
   </ItemGroup>
 </Project>

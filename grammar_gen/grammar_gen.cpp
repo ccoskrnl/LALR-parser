@@ -42,10 +42,18 @@ private:
         return tokens;
     }
 
-    // 判断是否为非终结符（假设非终结符以大写字母开头）
+    // 判断是否为非终结符（假设非终结符以大写字母开头或包含在<>中）
     bool isNonTerminal(const std::string& symbol) {
         if (symbol.empty()) return false;
-        return std::isupper(symbol[0]) || symbol == "ε" || symbol == "epsilon";
+        if (symbol == "ε" || symbol == "epsilon") return true;
+
+        // 检查是否被<>包围
+        if (symbol.size() >= 2 && symbol[0] == '<' && symbol[symbol.size() - 1] == '>') {
+            return true;
+        }
+
+        // 检查是否以大写字母开头
+        return std::isupper(static_cast<unsigned char>(symbol[0]));
     }
 
     // 提取符号名称（去掉尖括号）
@@ -87,6 +95,28 @@ private:
             line.substr(arrowPos, 3) == "\xE2\x86\x92") return 3;
 
         return 0;
+    }
+
+    // 将符号名称转换为有效的C++标识符
+    std::string toValidIdentifier(const std::string& name) {
+        if (name.empty()) return "empty";
+
+        std::string result;
+        for (char c : name) {
+            if (std::isalnum(static_cast<unsigned char>(c))) {
+                result += c;
+            }
+            else {
+                result += '_';
+            }
+        }
+
+        // 如果以数字开头，添加前缀
+        if (!result.empty() && std::isdigit(static_cast<unsigned char>(result[0]))) {
+            result = "NT_" + result;
+        }
+
+        return result;
     }
 
 public:
@@ -144,29 +174,50 @@ public:
             // 记录非终结符
             nonTerminals.insert(leftSymbol);
 
-            // 分割右部符号
-            std::vector<std::string> rightSymbols;
-            if (rightStr == "ε" || rightStr == "epsilon" || rightStr.empty()) {
-                // 空产生式
-                rightSymbols.push_back("epsilon");
+            // 处理右部多个产生式（用|分隔）
+            std::vector<std::string> alternatives;
+            size_t pipePos = rightStr.find('|');
+
+            if (pipePos == std::string::npos) {
+                alternatives.push_back(rightStr);
             }
             else {
-                // 按空格分割右部符号
-                std::vector<std::string> tokens = split(rightStr, ' ');
-                for (const auto& token : tokens) {
-                    std::string symbol = extractSymbolName(token);
-                    if (isNonTerminal(symbol)) {
-                        nonTerminals.insert(symbol);
-                    }
-                    else if (symbol != "epsilon") {
-                        terminals.insert(symbol);
-                    }
-                    rightSymbols.push_back(symbol);
+                // 分割多个产生式
+                size_t start = 0;
+                while (pipePos != std::string::npos) {
+                    alternatives.push_back(trim(rightStr.substr(start, pipePos - start)));
+                    start = pipePos + 1;
+                    pipePos = rightStr.find('|', start);
                 }
+                alternatives.push_back(trim(rightStr.substr(start)));
             }
 
-            // 添加到产生式集合
-            productions[leftSymbol].push_back(rightSymbols);
+            // 处理每个产生式
+            for (const auto& alt : alternatives) {
+                std::vector<std::string> rightSymbols;
+
+                if (alt == "ε" || alt == "epsilon" || alt.empty()) {
+                    // 空产生式
+                    rightSymbols.push_back("epsilon");
+                }
+                else {
+                    // 按空格分割右部符号
+                    std::vector<std::string> tokens = split(alt, ' ');
+                    for (const auto& token : tokens) {
+                        std::string symbol = extractSymbolName(token);
+                        if (isNonTerminal(symbol)) {
+                            nonTerminals.insert(symbol);
+                        }
+                        else if (symbol != "epsilon") {
+                            terminals.insert(symbol);
+                        }
+                        rightSymbols.push_back(symbol);
+                    }
+                }
+
+                // 添加到产生式集合
+                productions[leftSymbol].push_back(rightSymbols);
+            }
         }
 
         file.close();
@@ -185,21 +236,24 @@ public:
         code << "    // 定义非终结符\n";
         for (const auto& nt : nonTerminals) {
             if (nt != "epsilon") {
-                code << "    Symbol " << nt << "(\"" << nt << "\", SymbolType::NON_TERMINAL);\n";
+                std::string varName = toValidIdentifier(nt);
+                code << "    Symbol " << varName << "(\"" << nt << "\", SymbolType::NON_TERMINAL);\n";
             }
         }
         code << "\n";
 
         // 设置开始符号
         code << "    // 设置开始符号\n";
-        code << "    grammar.startSymbol = " << startSymbol << ";\n\n";
+        code << "    grammar.startSymbol = " << toValidIdentifier(startSymbol) << ";\n\n";
 
         // 添加产生式
         code << "    // 添加产生式\n";
         for (const auto& prod : productions) {
             const std::string& left = prod.first;
+            std::string leftVar = toValidIdentifier(left);
+
             for (const auto& right : prod.second) {
-                code << "    grammar.addProduction(" << left << ", {";
+                code << "    grammar.addProduction(" << leftVar << ", {";
 
                 for (size_t i = 0; i < right.size(); ++i) {
                     const std::string& symbol = right[i];
@@ -207,7 +261,7 @@ public:
                         code << "grammar.epsilon";
                     }
                     else if (nonTerminals.find(symbol) != nonTerminals.end()) {
-                        code << symbol;
+                        code << toValidIdentifier(symbol);
                     }
                     else {
                         // 终结符需要转义特殊字符
@@ -252,6 +306,7 @@ public:
     }
 };
 
+
 int main(int argc, char* argv[]) {
     //if (argc != 2) {
     //    std::cerr << "Usage: " << argv[0] << " <grammar_file>" << std::endl;
@@ -260,7 +315,8 @@ int main(int argc, char* argv[]) {
 
     GrammarParser parser;
 
-    if (!parser.parseGrammarFile("grammar_example.txt")) {
+    if (!parser.parseGrammarFile("gram_exp01.txt")) {
+    //if (!parser.parseGrammarFile("grammar_example.txt")) {
         return 1;
     }
     //if (!parser.parseGrammarFile(argv[1])) {
