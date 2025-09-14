@@ -399,9 +399,10 @@ std::shared_ptr<gram::lr0_item_set> gram::grammar::lr0_go_to(const lr0_item_set&
 	return lr0_closure(*result);
 }
 
-std::vector<std::shared_ptr<gram::lr0_item_set>> gram::grammar::build_lr0_states()
+//std::vector<std::shared_ptr<gram::lr0_item_set>> gram::grammar::build_lr0_states()
+void gram::grammar::build_lr0_states()
 {
-	std::vector<std::shared_ptr<gram::lr0_item_set>> lr0_states;
+	//std::vector<std::shared_ptr<gram::lr0_item_set>> lr0_states;
 
 	// Create the augmented grammar
     std::shared_ptr<gram::production_t> augmented_prod = std::make_shared<gram::production_t>(
@@ -503,11 +504,137 @@ std::vector<std::shared_ptr<gram::lr0_item_set>> gram::grammar::build_lr0_states
 	//	);
 	//}
 
-	return lr0_states;
+	//return lr0_states;
 }
 
 
+void gram::grammar::initialize_lalr1_states() {
 
+	//lr0_states = build_lr0_states();
+	lalr1_states.resize(lr0_states.size());
+
+	lalr1_states[0] = std::make_shared<lalr1_item_set>(0);
+
+	for (const auto& item : lr0_states[0]->get_items()) {
+		if (item.product->id == AUGMENTED_GRAMMAR_PROD_ID) {
+
+			lalr1_item_t start_item(item, { end_marker });
+			lalr1_states[0]->add_items(start_item);
+
+			break;
+		}
+	}
+
+	// initialize for other states
+	for (item_set_id_t i = 1; i < lr0_states.size(); i++) {
+		lalr1_states[i] = std::make_shared<lalr1_item_set>(i);
+		for (const auto& item : lr0_states[i]->get_items()) {
+
+			if (item.is_kernel_item()) {
+				lalr1_item_t la_item(item);
+				lalr1_states[i]->add_items(la_item);
+			}
+		}
+	}
+
+}
+
+void gram::grammar::propagate_lookaheads() {
+	bool changed;
+
+	std::vector<std::tuple<int, lr0_item_t, int, lr0_item_t>> propagation_edges;
+
+	for (item_set_id_t i = 0; i < lr0_states.size(); i++)
+	{
+		for (const auto& item : lr0_states[i]->get_items()) {
+
+			if (item.dot_pos >= item.product->right.size())
+				continue;
+
+
+			// X is the symbol after the dot
+			symbol_t X = item.next_symbol();
+
+			// get target state j
+			auto goto_key = std::make_pair(i, X);
+			if (goto_table.find(goto_key) == goto_table.end())
+				continue;
+
+			item_set_id_t j = goto_table[goto_key];
+
+			lalr1_item_t target_item(item.product, item.dot_pos + 1);
+
+			std::cout << "Processing item in state " << i << ": " << item.to_string() << std::endl;
+			std::cout << "Target item in state " << j << ": " << target_item.to_string() << std::endl;
+			std::cout << std::endl;
+
+			// compute beta
+			std::vector<symbol_t> beta;
+			for (int k = item.dot_pos + 1; k < item.product->right.size(); k++) {
+				beta.push_back(item.product->right[k]);
+			}
+
+			// compute FIRST(beta)
+			std::unordered_set<symbol_t, symbol_hasher> first_beta = comp_first_of_sequence(beta);
+
+			// compute lookaheads to propagate
+			// use pointer to avoid modifying the original item
+			const lalr1_item_t* source_la_item = lalr1_states[j]->find_item(target_item);
+			if (source_la_item != nullptr) {
+
+				if (first_beta.size() != 0) {
+
+					lalr1_states[j]->del_items(target_item);
+					for (const auto& la : first_beta) {
+						if (la != epsilon) {
+							target_item.lookaheads.insert(la);
+						}
+					}
+					lalr1_states[j]->add_items(target_item);
+
+				}
+			}
+
+			// if FIRST(beta) contains epsilon, add propagation edge
+			if (first_beta.size() == 0 || first_beta.find(epsilon) != first_beta.end()) {
+				propagation_edges.push_back(std::make_tuple(i, item, j, target_item));
+			}
+
+		}
+	}
+
+	//std::cout << lalr1_states_to_string() << std::endl;
+
+	do
+	{
+		changed = false;
+
+		for (const auto& [from_set_id, from_item, to_set_id, to_item] : propagation_edges) {
+
+			const lalr1_item_t* from_la_item = lalr1_states[from_set_id]->find_item(from_item);
+			const lalr1_item_t* to_la_item = lalr1_states[to_set_id]->find_item(to_item);
+			if (from_la_item == nullptr || to_la_item == nullptr)
+				continue;
+
+			size_t before_size = to_la_item->lookaheads.size();
+			// merge lookaheads
+			for (const auto& la : from_la_item->lookaheads) {
+				if (to_la_item->lookaheads.find(la) == to_la_item->lookaheads.end()) {
+					lalr1_item_t updated_to_item = *to_la_item;
+					updated_to_item.lookaheads.insert(la);
+					lalr1_states[to_set_id]->items.erase(*to_la_item);
+					lalr1_states[to_set_id]->add_items(updated_to_item);
+				}
+			}
+			if (to_la_item->lookaheads.size() > before_size) {
+				changed = true;
+			}
+		}
+
+	} while (changed);
+
+	//std::cout << lalr1_states_to_string() << std::endl;
+}
 
 std::tuple<
 	std::unordered_map<gram::lalr1_item_t, gram::symbol_t, gram::lr0_item_hasher>,

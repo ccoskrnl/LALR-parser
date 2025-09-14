@@ -26,6 +26,9 @@
     <ClInclude Include="lr_parser.h">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="framework.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Text Include="gram_exp01.txt" />
