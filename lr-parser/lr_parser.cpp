@@ -1,3 +1,4 @@
+#include "framework.h"
 #include "lr_parser.h"
 
 #include <iostream>
@@ -13,7 +14,8 @@
 #include <codecvt>
 
 
-production_id_t gram::production::prod_id_size = 1;
+production_id_t gram::production_t::prod_id_size = 1;
+item_set_id_t gram::lr0_item_set::lr0_item_set_size = 0;
 
 static std::string trim(const std::string & str) {
 	size_t start = str.find_first_not_of(" \t\n\r");
@@ -156,11 +158,11 @@ gram::grammar grammar_parser(const std::string& filename) {
 		// set the start symbol (the first non-terminal)
 		if (first_production) {
 			first_production = false;
-			grammar.start_symbol = gram::symbol(left_symbol, gram::symbol_type::NON_TERMINAL);
+			grammar.start_symbol = gram::symbol_t(left_symbol, gram::symbol_type_t::NON_TERMINAL);
 		}
 
 		// record the non-terminal
-		grammar.non_terminals.insert(gram::symbol(left_symbol, gram::symbol_type::NON_TERMINAL));
+		grammar.non_terminals.insert(gram::symbol_t(left_symbol, gram::symbol_type_t::NON_TERMINAL));
 
 		// handle multiple productions on the right side (separated by |)
 		std::vector<std::string> alternatives;
@@ -182,7 +184,7 @@ gram::grammar grammar_parser(const std::string& filename) {
 
 		// handle each production
 		for (const auto& alt : alternatives) {
-			std::vector<gram::symbol> right_symbols;
+			std::vector<gram::symbol_t> right_symbols;
 			if (alt == "¦Å" || alt == "epsilon" || alt.empty()) {
 				// empty production
 				right_symbols.push_back(grammar.epsilon);
@@ -196,13 +198,13 @@ gram::grammar grammar_parser(const std::string& filename) {
 						std::cerr << "Error: Invalid symbol: " << token << std::endl;
 						continue;
 					}
-					gram::symbol symbol;
+					gram::symbol_t symbol;
 					if (is_non_terminal(token)) {
-						symbol = gram::symbol(symbol_name, gram::symbol_type::NON_TERMINAL);
+						symbol = gram::symbol_t(symbol_name, gram::symbol_type_t::NON_TERMINAL);
 						grammar.non_terminals.insert(symbol);
 					}
 					else {
-						symbol = gram::symbol(symbol_name, gram::symbol_type::TERMINAL);
+						symbol = gram::symbol_t(symbol_name, gram::symbol_type_t::TERMINAL);
 						if (!(symbol == grammar.epsilon)) {
 							grammar.terminals.insert(symbol);
 						}
@@ -212,7 +214,7 @@ gram::grammar grammar_parser(const std::string& filename) {
 			}
 			// add to the production set
 			grammar.add_production(
-				gram::symbol(left_symbol, gram::symbol_type::NON_TERMINAL),
+				gram::symbol_t(left_symbol, gram::symbol_type_t::NON_TERMINAL),
 				right_symbols
 			);
 		}
@@ -228,6 +230,7 @@ gram::grammar grammar_parser(const std::string& filename) {
 std::shared_ptr<gram::lalr1_item_set> gram::grammar::closure(const gram::lalr1_item_set& I)
 {
 	std::shared_ptr<lalr1_item_set> new_I = std::make_shared<lalr1_item_set>(I);
+	std::unordered_map<lalr1_item_t, bool, lr0_item_hasher> item_handled;
 
 	bool changed = true;
 
@@ -235,53 +238,76 @@ std::shared_ptr<gram::lalr1_item_set> gram::grammar::closure(const gram::lalr1_i
 	{
 		changed = false;
 
-		std::unordered_set<lalr1_item, lr_item_hasher> current_items = new_I->get_items(); // Copy current items to avoid modification during iteration
+		// Copy current items to avoid modification during iteration
+		std::unordered_set<lalr1_item_t, lalr1_item_hasher> current_items = new_I->get_items(); 
 
-		for (const gram::lalr1_item& item : current_items) {
-			gram::symbol next_sym = item.next_symbol();
+		for (const gram::lalr1_item_t& item : current_items) {
 
-			if (next_sym.type == gram::symbol_type::NON_TERMINAL && !next_sym.name.empty()) {
+			auto it_handled = item_handled.find(item);
+			if (it_handled != item_handled.end() && it_handled->second) {
+				continue; // Already processed
+			}
+
+			item_handled[item] = true; // Mark as processed
+			
+
+			gram::symbol_t next_sym = item.next_symbol();
+
+			if (next_sym.type == gram::symbol_type_t::NON_TERMINAL && !next_sym.name.empty()) {
 
 				// compute beta a (the right part after the non-terminal and the lookaheads)
-				std::vector<gram::symbol> beta_a;
+				std::vector<gram::symbol_t> beta_a;
 				for (int i = item.dot_pos + 1; i < item.product->right.size(); i++) {
 					beta_a.push_back(item.product->right[i]);
 				}
 
 				// compute FIRST(beta a)
-				std::unordered_set<gram::symbol, gram::symbol_hasher> lookaheads =
+				std::unordered_set<gram::symbol_t, gram::symbol_hasher> lookaheads =
 					comp_first_of_sequence(beta_a, item.lookaheads);
 
+				// merge with existing lookaheads
+				lookaheads.insert(item.lookaheads.begin(), item.lookaheads.end());
+
 				// add new items for each production of next_sym
-				std::vector<std::shared_ptr<gram::production>> prods = get_productions_for(next_sym);
+				std::vector<std::shared_ptr<gram::production_t>> prods = get_productions_for(next_sym);
 
-				for (const std::shared_ptr<gram::production> prod : prods) {
+				for (const std::shared_ptr<gram::production_t> prod : prods) {
 
-                    gram::lalr1_item new_item(prod, 0, lookaheads);
+                    gram::lalr1_item_t new_item(prod, 0, lookaheads);
 
-					// Check if the new item (with same core) already exists
-					//auto found = new_I.items.find(new_item);
-					lalr1_item* found = new_I->find_item(prod->id, 0);
-					if (found != nullptr) {
+					//auto existing_item_iter = std::find_if(
+					//	new_I->items.begin(), new_I->items.end(),
+					//	[&new_item](const lalr1_item& existing) {
+					//		return existing.product->id == new_item.product->id &&
+					//			existing.dot_pos == new_item.dot_pos;
+					//	});
 
-						size_t before_size = found->lookaheads.size();
+					const lalr1_item_t* existing_item = new_I->find_item(new_item);
 
-						// Because std::unordered_set's iterator is const, we need to use a workaround
-						// to modify the lookaheads of the found item
-						gram::lalr1_item megred_item = *found; // Copy the found item
-						new_I->items.erase(*found); // Remove the old item
+					//if (existing_item_iter != new_I->items.end()) {
+					if (existing_item != nullptr) {
+						// Item with same core exists, merge lookaheads
+						//size_t before_size = existing_item_iter->lookaheads.size();
+						size_t before_size = existing_item->lookaheads.size();
 
-						megred_item.lookaheads.insert(lookaheads.begin(), lookaheads.end()); // Merge lookaheads
-						new_I->items.insert(megred_item); // Reinsert the modified item
+						//gram::lalr1_item merged_item = *existing_item_iter; // Copy existing item
+						gram::lalr1_item_t merged_item = *existing_item; // Copy existing item
 
-						if (found->lookaheads.size() > before_size) {
+
+						new_I->items.erase(*existing_item); // Remove old item
+						//new_I->items.erase(*existing_item_iter); // Remove old item
+						merged_item.lookaheads.insert(lookaheads.begin(), lookaheads.end()); // Merge lookaheads
+						new_I->items.insert(merged_item); // Reinsert modified item
+						if (merged_item.lookaheads.size() > before_size) {
 							changed = true;
 						}
 					}
 					else {
+						// New item, simply add it
 						new_I->items.insert(new_item);
 						changed = true;
 					}
+
 				}
 
 			}
@@ -295,7 +321,7 @@ std::shared_ptr<gram::lalr1_item_set> gram::grammar::closure(const gram::lalr1_i
 	return new_I;
 }
 
-std::shared_ptr<gram::lalr1_item_set> gram::grammar::go_to(const lalr1_item_set& I, const symbol& X)
+std::shared_ptr<gram::lalr1_item_set> gram::grammar::go_to(const lalr1_item_set& I, const symbol_t& X)
 {
 
 	std::shared_ptr<lalr1_item_set> new_set = std::make_shared<lalr1_item_set>();
@@ -303,7 +329,7 @@ std::shared_ptr<gram::lalr1_item_set> gram::grammar::go_to(const lalr1_item_set&
 	for (const auto& item : I.items) {
 		if (item.dot_pos < item.product->right.size() &&
 			item.product->right[item.dot_pos] == X) {
-			gram::lalr1_item moved_item(item.product, item.dot_pos + 1, item.lookaheads);
+			gram::lalr1_item_t moved_item(item.product, item.dot_pos + 1, item.lookaheads);
 			new_set->items.insert(moved_item);
 		}
 	}
@@ -323,24 +349,26 @@ std::shared_ptr<gram::lr0_item_set> gram::grammar::lr0_closure(const lr0_item_se
 	{
 		changed = false;
 
-		std::unordered_set<lr0_item, lr_item_hasher> current_items = new_I->get_items(); // Copy current items to avoid modification during iteration
+		std::unordered_set<lr0_item_t, lr0_item_hasher> current_items = new_I->get_items(); // Copy current items to avoid modification during iteration
 
-		for (const gram::lr0_item& i : current_items) {
-			gram::symbol next_sym = i.next_symbol();
+		for (const gram::lr0_item_t& i : current_items) {
+			gram::symbol_t next_sym = i.next_symbol();
 
-			if (next_sym.type == gram::symbol_type::NON_TERMINAL && !next_sym.name.empty()) {
+			if (next_sym.type == gram::symbol_type_t::NON_TERMINAL && !next_sym.name.empty()) {
 				// add new items for each production of next_sym
-				std::vector<std::shared_ptr<gram::production>> prods = get_productions_for(next_sym);
+				std::vector<std::shared_ptr<gram::production_t>> prods = get_productions_for(next_sym);
 				for (auto& prod : prods) {
 					//gram::lr0_item new_item(const_cast<gram::production*>(&prod), 0);
-					gram::lr0_item new_item(prod, 0);
+					gram::lr0_item_t new_item(prod, 0);
 
 					// Check if the new item already exists
-					auto found = new_I->find_item(prod->id, 0);
+						
+					const gram::lr0_item_t* found = new_I->find_item(new_item);
 					if (found == nullptr) {
 						new_I->add_items(new_item);
 						changed = true;
 					}
+
 				}
 			}
 
@@ -352,14 +380,14 @@ std::shared_ptr<gram::lr0_item_set> gram::grammar::lr0_closure(const lr0_item_se
 	return new_I;
 }
 
-std::shared_ptr<gram::lr0_item_set> gram::grammar::lr0_go_to(const lr0_item_set& I, const symbol& X) const
+std::shared_ptr<gram::lr0_item_set> gram::grammar::lr0_go_to(const lr0_item_set& I, const symbol_t& X) const
 {
 
 	auto result = std::make_shared<lr0_item_set>();
 
 	for (const auto& item : I.get_items()) {
 		if (item.next_symbol() == X) {
-			gram::lr0_item moved_item(item.product, item.dot_pos + 1);
+			gram::lr0_item_t moved_item(item.product, item.dot_pos + 1);
 			result->add_items(moved_item);
 		}
 	}
@@ -376,10 +404,10 @@ std::vector<std::shared_ptr<gram::lr0_item_set>> gram::grammar::build_lr0_states
 	std::vector<std::shared_ptr<gram::lr0_item_set>> lr0_states;
 
 	// Create the augmented grammar
-    std::shared_ptr<gram::production> augmented_prod = std::make_shared<gram::production>(
-        gram::symbol(start_symbol.name + "'", gram::symbol_type::NON_TERMINAL),
-        std::vector<gram::symbol>{ start_symbol },
-        std::string("")
+    std::shared_ptr<gram::production_t> augmented_prod = std::make_shared<gram::production_t>(
+        gram::symbol_t(start_symbol.name + "'", gram::symbol_type_t::NON_TERMINAL),
+        std::vector<gram::symbol_t>{ start_symbol },
+		action_t{}  // Empty action
     );
 
 	// set the start symbol to the new augmented start symbol
@@ -387,8 +415,9 @@ std::vector<std::shared_ptr<gram::lr0_item_set>> gram::grammar::build_lr0_states
 	productions.insert({ augmented_prod->left, { augmented_prod } });
 	
 	// initialize the first item set with the augmented production
-	lr0_item_set start_set(0);
-	start_set.items.insert(gram::lalr1_item(augmented_prod, 0, { end_marker }));
+	lr0_item_set start_set;
+	start_set.id = 0;
+	start_set.items.insert(gram::lalr1_item_t(augmented_prod, 0, { end_marker }));
 
 	// compute its closure
 	std::shared_ptr<lr0_item_set> closured_start_set = lr0_closure(start_set);
@@ -398,10 +427,10 @@ std::vector<std::shared_ptr<gram::lr0_item_set>> gram::grammar::build_lr0_states
 		std::shared_ptr<gram::lr0_item_set> current_set = lr0_states[i];
 
 		// collect all symbols that can be transitioned on
-		std::unordered_set<gram::symbol, gram::symbol_hasher> transition_symbols;
+		std::unordered_set<gram::symbol_t, gram::symbol_hasher> transition_symbols;
 
 		for (const auto& item : current_set->get_items()) {
-			gram::symbol next_sym = item.next_symbol();
+			gram::symbol_t next_sym = item.next_symbol();
 			if (!next_sym.name.empty()) {
 				transition_symbols.insert(next_sym);
 			}
@@ -413,8 +442,8 @@ std::vector<std::shared_ptr<gram::lr0_item_set>> gram::grammar::build_lr0_states
 			if (goto_set != nullptr && !goto_set->get_items().empty()) {
 				// check if this set already exists
 				bool exists = false;
-				for (const auto& state : lr0_states) {
-					if (*state == *goto_set) {
+				for (const auto& I : lr0_states) {
+					if (*I == *goto_set) {
 						exists = true;
 						break;
 					}
@@ -425,11 +454,14 @@ std::vector<std::shared_ptr<gram::lr0_item_set>> gram::grammar::build_lr0_states
 					goto_set->id = static_cast<item_set_id_t>(lr0_states.size());
 
 					lr0_states.push_back(goto_set);
+					goto_table[{ current_set->id, symbol }] = static_cast<item_set_id_t>(goto_set->id);
 				}
 			}
 		}
 
 	}
+
+#ifdef __DEBUG__
 	
 	std::cout << "Total LR(0) states: " << lr0_states.size() << std::endl;
 	for (const auto& state : lr0_states) {
@@ -454,6 +486,8 @@ std::vector<std::shared_ptr<gram::lr0_item_set>> gram::grammar::build_lr0_states
 		}
 	}
 
+#endif
+
 	//// Remove non-kernel items from each state
 	//for (auto& state_ptr : lr0_states) {
 	//	auto& items = state_ptr->get_items();
@@ -476,14 +510,29 @@ std::vector<std::shared_ptr<gram::lr0_item_set>> gram::grammar::build_lr0_states
 
 
 std::tuple<
-	std::unordered_map<gram::lalr1_item, gram::symbol, gram::lr_item_hasher>,
-	std::unordered_set<gram::lalr1_item, gram::lr_item_hasher>
+	std::unordered_map<gram::lalr1_item_t, gram::symbol_t, gram::lr0_item_hasher>,
+	std::unordered_set<gram::lalr1_item_t, gram::lr0_item_hasher>
 > gram::grammar::detemine_lookaheads(
-	const std::shared_ptr<gram::lr0_item_set>& I, const gram::symbol& X
+	const std::shared_ptr<gram::lr0_item_set>& I, const gram::symbol_t& X
 )
 {
-	std::unordered_map<gram::lalr1_item, gram::symbol, gram::lr_item_hasher> spontaneous_lookaheads;
-	std::unordered_set<gram::lalr1_item, gram::lr_item_hasher> propagated_lookaheads;
+	std::unordered_map<gram::lalr1_item_t, gram::symbol_t, gram::lr0_item_hasher> spontaneous_lookaheads;
+	std::unordered_set<gram::lalr1_item_t, gram::lr0_item_hasher> propagated_lookaheads;
+
+	//std::vector<gram::lr0_item*> kernel_item_ptrs;
+	//// collect kernel items
+	//for (const auto& item : I->get_items()) {
+	//	if (item.is_kernel_item()) {
+	//		kernel_item_ptrs.push_back(const_cast<gram::lr0_item*>(&item));
+	//	}
+	//}
+
+	//for (const gram::lr0_item* item_ptr : kernel_item_ptrs) {
+	//	if (item_ptr->next_symbol() == X) {
+
+	//	}
+	//}
+
 
 	for (const auto& lr0item : I->get_items()) {
 
@@ -491,7 +540,7 @@ std::tuple<
 			continue;
 
 		gram::lalr1_item_set original_item_set(0);
-		gram::lalr1_item lr0item_with_lookahead(
+		gram::lalr1_item_t lr0item_with_lookahead(
 			lr0item,
 			{ lookahead_sentinel } // initial lookahead
 		);
@@ -500,15 +549,18 @@ std::tuple<
 
 		auto J = closure(original_item_set);
 
-		// compute beta, dot_pos + 1 to end
-		std::vector<gram::symbol> beta;
-		for (int j = lr0item.dot_pos + 1; j < lr0item.product->right.size(); j++) {
-			beta.push_back(lr0item.product->right[j]);
-		}
+		//// compute beta, dot_pos + 1 to end
+		//std::vector<gram::symbol> beta;
+		//for (int j = lr0item.dot_pos + 1; j < lr0item.product->right.size(); j++) {
+		//	beta.push_back(lr0item.product->right[j]);
+		//}
 
-		// compute FIRST(beta)
-		std::unordered_set<gram::symbol, gram::symbol_hasher> first_beta = comp_first_of_sequence(beta);
-		
+		//// compute FIRST(beta)
+		//if (beta.empty()) {
+		//	beta.push_back(lookahead_sentinel);
+		//}
+		//std::unordered_set<gram::symbol, gram::symbol_hasher> first_beta = comp_first_of_sequence(beta);
+		//
 
 		for (const auto& item_in_J : J->items) {
 			// for each [B -> ¦Ã . X ¦È, a] in J 
@@ -562,9 +614,9 @@ void gram::grammar::comp_first_sets() {
 				// Check each symbol in the production from left to right
 				while (i < prod->right.size() && continue_checking)
 				{
-					const gram::symbol& sym = prod->right[i];
+					const gram::symbol_t& sym = prod->right[i];
 
-					if (sym.type == gram::symbol_type::TERMINAL) {
+					if (sym.type == gram::symbol_type_t::TERMINAL) {
 						// If it's a terminal, add it to the FIRST set
 						if (first_sets[left].insert(sym).second) {
 							// extract the boolean result of insert 
@@ -618,17 +670,17 @@ void gram::grammar::comp_first_sets() {
 	 - Otherwise, proceed to the next symbol
 2. **Handling ¦Å**: If all symbols in the sequence can derive ¦Å, add the passed-in look-ahead symbol to the result set
 */
-std::unordered_set<gram::symbol, gram::symbol_hasher> gram::grammar::comp_first_of_sequence(
-	const std::vector<gram::symbol>& sequence,
-	const std::unordered_set<gram::symbol, gram::symbol_hasher>& lookaheads
+std::unordered_set<gram::symbol_t, gram::symbol_hasher> gram::grammar::comp_first_of_sequence(
+	const std::vector<gram::symbol_t>& sequence,
+	const std::unordered_set<gram::symbol_t, gram::symbol_hasher>& lookaheads
 )
 {
-	std::unordered_set<gram::symbol, gram::symbol_hasher> result;
+	std::unordered_set<gram::symbol_t, gram::symbol_hasher> result;
 
 	bool all_contain_epsilon = true;
 
 	for (const auto& sym : sequence) {
-		if (sym.type == gram::symbol_type::TERMINAL) {
+		if (sym.type == gram::symbol_type_t::TERMINAL) {
 			result.insert(sym);
 			all_contain_epsilon = false;
 			break;
