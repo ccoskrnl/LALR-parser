@@ -30,4 +30,9 @@
   <ItemGroup>
     <Text Include="gram_exp01.txt" />
   </ItemGroup>
+  <ItemGroup>
+    <Natvis Include="NatvisFile.natvis">
+      <Filter>资源文件</Filter>
+    </Natvis>
+  </ItemGroup>
 </Project>
