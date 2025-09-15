@@ -229,7 +229,12 @@ gram::grammar grammar_parser(const std::string& filename) {
 
 std::shared_ptr<gram::lalr1_item_set> gram::grammar::closure(const gram::lalr1_item_set& I)
 {
+
+	if (I.items.empty())
+		return std::make_shared<lalr1_item_set>();
+
 	std::shared_ptr<lalr1_item_set> new_I = std::make_shared<lalr1_item_set>(I);
+	new_I->id = I.id;
 	std::unordered_map<lalr1_item_t, bool, lr0_item_hasher> item_handled;
 
 	bool changed = true;
@@ -239,7 +244,7 @@ std::shared_ptr<gram::lalr1_item_set> gram::grammar::closure(const gram::lalr1_i
 		changed = false;
 
 		// Copy current items to avoid modification during iteration
-		std::unordered_set<lalr1_item_t, lalr1_item_hasher> current_items = new_I->get_items(); 
+		auto current_items = new_I->get_items(); 
 
 		for (const gram::lalr1_item_t& item : current_items) {
 
@@ -263,10 +268,10 @@ std::shared_ptr<gram::lalr1_item_set> gram::grammar::closure(const gram::lalr1_i
 
 				// compute FIRST(beta a)
 				std::unordered_set<gram::symbol_t, gram::symbol_hasher> lookaheads =
-					comp_first_of_sequence(beta_a, item.lookaheads);
+					comp_first_of_sequence(beta_a, *item.lookaheads);
 
 				// merge with existing lookaheads
-				lookaheads.insert(item.lookaheads.begin(), item.lookaheads.end());
+				lookaheads.insert(item.lookaheads->begin(), item.lookaheads->end());
 
 				// add new items for each production of next_sym
 				std::vector<std::shared_ptr<gram::production_t>> prods = get_productions_for(next_sym);
@@ -288,7 +293,7 @@ std::shared_ptr<gram::lalr1_item_set> gram::grammar::closure(const gram::lalr1_i
 					if (existing_item != nullptr) {
 						// Item with same core exists, merge lookaheads
 						//size_t before_size = existing_item_iter->lookaheads.size();
-						size_t before_size = existing_item->lookaheads.size();
+						size_t before_size = existing_item->lookaheads->size();
 
 						//gram::lalr1_item merged_item = *existing_item_iter; // Copy existing item
 						gram::lalr1_item_t merged_item = *existing_item; // Copy existing item
@@ -296,9 +301,10 @@ std::shared_ptr<gram::lalr1_item_set> gram::grammar::closure(const gram::lalr1_i
 
 						new_I->items.erase(*existing_item); // Remove old item
 						//new_I->items.erase(*existing_item_iter); // Remove old item
-						merged_item.lookaheads.insert(lookaheads.begin(), lookaheads.end()); // Merge lookaheads
+						//merged_item.lookaheads.insert(lookaheads.begin(), lookaheads.end()); // Merge lookaheads
+						merged_item.add_lookaheads(lookaheads);
 						new_I->items.insert(merged_item); // Reinsert modified item
-						if (merged_item.lookaheads.size() > before_size) {
+						if (merged_item.lookaheads->size() > before_size) {
 							changed = true;
 						}
 					}
@@ -315,8 +321,8 @@ std::shared_ptr<gram::lalr1_item_set> gram::grammar::closure(const gram::lalr1_i
 
 	} while (changed);
 
-	std::cout << "LALR(1) Closure of start state:" << std::endl;
-	std::cout << *new_I << std::endl;
+	//std::cout << "LALR(1) Closure of start state:" << std::endl;
+	//std::cout << *new_I << std::endl;
 
 	return new_I;
 }
@@ -327,9 +333,12 @@ std::shared_ptr<gram::lalr1_item_set> gram::grammar::go_to(const lalr1_item_set&
 	std::shared_ptr<lalr1_item_set> new_set = std::make_shared<lalr1_item_set>();
 
 	for (const auto& item : I.items) {
+
+		//std::cout << item.to_string() << std::endl;
+
 		if (item.dot_pos < item.product->right.size() &&
-			item.product->right[item.dot_pos] == X) {
-			gram::lalr1_item_t moved_item(item.product, item.dot_pos + 1, item.lookaheads);
+			item.next_symbol() == X) {
+			gram::lalr1_item_t moved_item(item.product, item.dot_pos + 1, *item.lookaheads);
 			new_set->items.insert(moved_item);
 		}
 	}
@@ -508,6 +517,11 @@ void gram::grammar::build_lr0_states()
 }
 
 
+/*
+	We initialize the LALR(1) states based on the LR(0) states.
+	All lalr(1) items are initialized with empty lookahead sets,
+	except for the start item in state 0, which is initialized with the end marker ($).
+*/
 void gram::grammar::initialize_lalr1_states() {
 
 	//lr0_states = build_lr0_states();
@@ -548,6 +562,9 @@ void gram::grammar::propagate_lookaheads() {
 	{
 		for (const auto& item : lr0_states[i]->get_items()) {
 
+			if (item.is_kernel_item())
+				continue;
+
 			if (item.dot_pos >= item.product->right.size())
 				continue;
 
@@ -587,7 +604,8 @@ void gram::grammar::propagate_lookaheads() {
 					lalr1_states[j]->del_items(target_item);
 					for (const auto& la : first_beta) {
 						if (la != epsilon) {
-							target_item.lookaheads.insert(la);
+							//target_item.lookaheads.insert(la);
+							target_item.add_lookahead(la);
 						}
 					}
 					lalr1_states[j]->add_items(target_item);
@@ -616,17 +634,18 @@ void gram::grammar::propagate_lookaheads() {
 			if (from_la_item == nullptr || to_la_item == nullptr)
 				continue;
 
-			size_t before_size = to_la_item->lookaheads.size();
+			size_t before_size = to_la_item->lookaheads->size();
 			// merge lookaheads
-			for (const auto& la : from_la_item->lookaheads) {
-				if (to_la_item->lookaheads.find(la) == to_la_item->lookaheads.end()) {
+			for (const auto& la : *from_la_item->lookaheads) {
+				if (to_la_item->lookaheads->find(la) == to_la_item->lookaheads->end()) {
 					lalr1_item_t updated_to_item = *to_la_item;
-					updated_to_item.lookaheads.insert(la);
+					//updated_to_item.lookaheads.insert(la);
+					updated_to_item.add_lookahead(la);
 					lalr1_states[to_set_id]->items.erase(*to_la_item);
 					lalr1_states[to_set_id]->add_items(updated_to_item);
 				}
 			}
-			if (to_la_item->lookaheads.size() > before_size) {
+			if (to_la_item->lookaheads->size() > before_size) {
 				changed = true;
 			}
 		}
@@ -636,84 +655,84 @@ void gram::grammar::propagate_lookaheads() {
 	//std::cout << lalr1_states_to_string() << std::endl;
 }
 
-std::tuple<
-	std::unordered_map<gram::lalr1_item_t, gram::symbol_t, gram::lr0_item_hasher>,
-	std::unordered_set<gram::lalr1_item_t, gram::lr0_item_hasher>
-> gram::grammar::detemine_lookaheads(
-	const std::shared_ptr<gram::lr0_item_set>& I, const gram::symbol_t& X
-)
-{
-	std::unordered_map<gram::lalr1_item_t, gram::symbol_t, gram::lr0_item_hasher> spontaneous_lookaheads;
-	std::unordered_set<gram::lalr1_item_t, gram::lr0_item_hasher> propagated_lookaheads;
-
-	//std::vector<gram::lr0_item*> kernel_item_ptrs;
-	//// collect kernel items
-	//for (const auto& item : I->get_items()) {
-	//	if (item.is_kernel_item()) {
-	//		kernel_item_ptrs.push_back(const_cast<gram::lr0_item*>(&item));
-	//	}
-	//}
-
-	//for (const gram::lr0_item* item_ptr : kernel_item_ptrs) {
-	//	if (item_ptr->next_symbol() == X) {
-
-	//	}
-	//}
-
-
-	for (const auto& lr0item : I->get_items()) {
-
-		if (!lr0item.is_kernel_item())
-			continue;
-
-		gram::lalr1_item_set original_item_set(0);
-		gram::lalr1_item_t lr0item_with_lookahead(
-			lr0item,
-			{ lookahead_sentinel } // initial lookahead
-		);
-
-		original_item_set.add_items(lr0item_with_lookahead);
-
-		auto J = closure(original_item_set);
-
-		//// compute beta, dot_pos + 1 to end
-		//std::vector<gram::symbol> beta;
-		//for (int j = lr0item.dot_pos + 1; j < lr0item.product->right.size(); j++) {
-		//	beta.push_back(lr0item.product->right[j]);
-		//}
-
-		//// compute FIRST(beta)
-		//if (beta.empty()) {
-		//	beta.push_back(lookahead_sentinel);
-		//}
-		//std::unordered_set<gram::symbol, gram::symbol_hasher> first_beta = comp_first_of_sequence(beta);
-		//
-
-		for (const auto& item_in_J : J->items) {
-			// for each [B -> ¦Ã . X ¦È, a] in J 
-			if (item_in_J.next_symbol() == X) {
-
-
-				for (const auto& la : item_in_J.lookaheads) {
-					if (la != lookahead_sentinel)
-					{
-						//auto goto_items = go_to(*J, X);
-						spontaneous_lookaheads[item_in_J] = la;
-					}
-					else
-					{
-						propagated_lookaheads.insert(item_in_J);
-					}
-				}
-
-			}
-		}
-
-	}
-
-	return { spontaneous_lookaheads, propagated_lookaheads };
-
-}
+//std::tuple<
+//	std::unordered_map<gram::lalr1_item_t, gram::symbol_t, gram::lr0_item_hasher>,
+//	std::unordered_set<gram::lalr1_item_t, gram::lr0_item_hasher>
+//> gram::grammar::detemine_lookaheads(
+//	const std::shared_ptr<gram::lr0_item_set>& I, const gram::symbol_t& X
+//)
+//{
+//	std::unordered_map<gram::lalr1_item_t, gram::symbol_t, gram::lr0_item_hasher> spontaneous_lookaheads;
+//	std::unordered_set<gram::lalr1_item_t, gram::lr0_item_hasher> propagated_lookaheads;
+//
+//	//std::vector<gram::lr0_item*> kernel_item_ptrs;
+//	//// collect kernel items
+//	//for (const auto& item : I->get_items()) {
+//	//	if (item.is_kernel_item()) {
+//	//		kernel_item_ptrs.push_back(const_cast<gram::lr0_item*>(&item));
+//	//	}
+//	//}
+//
+//	//for (const gram::lr0_item* item_ptr : kernel_item_ptrs) {
+//	//	if (item_ptr->next_symbol() == X) {
+//
+//	//	}
+//	//}
+//
+//
+//	for (const auto& lr0item : I->get_items()) {
+//
+//		if (!lr0item.is_kernel_item())
+//			continue;
+//
+//		gram::lalr1_item_set original_item_set(0);
+//		gram::lalr1_item_t lr0item_with_lookahead(
+//			lr0item,
+//			{ lookahead_sentinel } // initial lookahead
+//		);
+//
+//		original_item_set.add_items(lr0item_with_lookahead);
+//
+//		auto J = closure(original_item_set);
+//
+//		//// compute beta, dot_pos + 1 to end
+//		//std::vector<gram::symbol> beta;
+//		//for (int j = lr0item.dot_pos + 1; j < lr0item.product->right.size(); j++) {
+//		//	beta.push_back(lr0item.product->right[j]);
+//		//}
+//
+//		//// compute FIRST(beta)
+//		//if (beta.empty()) {
+//		//	beta.push_back(lookahead_sentinel);
+//		//}
+//		//std::unordered_set<gram::symbol, gram::symbol_hasher> first_beta = comp_first_of_sequence(beta);
+//		//
+//
+//		for (const auto& item_in_J : J->items) {
+//			// for each [B -> ¦Ã . X ¦È, a] in J 
+//			if (item_in_J.next_symbol() == X) {
+//
+//
+//				for (const auto& la : item_in_J.lookaheads) {
+//					if (la != lookahead_sentinel)
+//					{
+//						//auto goto_items = go_to(*J, X);
+//						spontaneous_lookaheads[item_in_J] = la;
+//					}
+//					else
+//					{
+//						propagated_lookaheads.insert(item_in_J);
+//					}
+//				}
+//
+//			}
+//		}
+//
+//	}
+//
+//	return { spontaneous_lookaheads, propagated_lookaheads };
+//
+//}
 
 /*
 ### Algorithm Features
