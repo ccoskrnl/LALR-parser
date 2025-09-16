@@ -16,41 +16,71 @@
 #include <memory>
 #include <any>
 #include <functional>
-
+#include <sstream>
+#include <iomanip>
 
 //typedef uint64_t item_set_id_t;
-using item_set_id_t = uint16_t;
+using item_set_id_t = int32_t;
 using item_id_t = uint64_t;
-using production_id_t = int64_t;
+using parser_action_value_t = int32_t;
+using production_id_t = parser_action_value_t;
 constexpr production_id_t AUGMENTED_GRAMMAR_PROD_ID = 0;
 
+static_assert(std::is_same_v < parser_action_value_t, production_id_t> , "action_value_t and production_id_t must be the same type");
 
-namespace gram {
+namespace parse {
 
-	enum class action_type_t {
+	enum class parser_action_type_t {
 		SHIFT,
 		REDUCE,
 		ACCEPT,
 		ERROR
 	};
 
-	struct action_t {
-		action_type_t type;
-		int value;
-		action_t(action_type_t t = action_type_t::ERROR, int v = -1) : type(t), value(v) { }
+	struct parser_action_t {
+		parser_action_type_t type;
+		parser_action_value_t value;
+		parser_action_t(parser_action_type_t t = parser_action_type_t::ERROR, parser_action_value_t v = -1) : type(t), value(v) { }
 
-		bool operator==(const action_t& other) const {
+		bool operator==(const parser_action_t& other) const {
 			return type == other.type && value == other.value;
 		}
-		bool operator!=(const action_t& other) const {
+		bool operator!=(const parser_action_t& other) const {
 			return !(*this == other);
+		}
+
+		std::string to_string() const {
+			std::stringstream ss;
+
+			switch (type) {
+			case parser_action_type_t::SHIFT:
+				ss << "SHIFT(" << value << ")";
+				break;
+			case parser_action_type_t::REDUCE:
+				ss << "REDUCE(" << value << ")";
+				break;
+			case parser_action_type_t::ACCEPT:
+				ss << "ACCEPT";
+				break;
+			case parser_action_type_t::ERROR:
+				ss << "ERROR";
+				break;
+			default:
+				ss << "UNKNOWN";
+				break;
+			}
+
+			return ss.str();
 		}
 	};
 
 	static_assert(
-		std::is_constructible_v<action_t, action_type_t, int>,
+		std::is_constructible_v<parser_action_t, parser_action_type_t, int>,
 		"action_t must be constructible from action_type_t and int"
 	);
+
+
+
 
 	enum class symbol_type_t {
 		TERMINAL,
@@ -87,6 +117,12 @@ namespace gram {
 		}
 	};
 
+	struct symbol_less {
+		bool operator()(const parse::symbol_t& a, const parse::symbol_t& b) const {
+			return a < b;
+		}
+	};
+
 	struct production_t {
 
 		static production_id_t prod_id_size;
@@ -94,14 +130,9 @@ namespace gram {
 		symbol_t left;
 		std::vector<symbol_t> right;
 		production_id_t id;
-		action_t action;
 
 		production_t(const symbol_t& l, const std::vector<symbol_t>& r)
-			: production_t(l, r, action_t{}) {
-		}
-
-		production_t(const symbol_t& l, const std::vector<symbol_t>& r, action_t a = {})
-			: left(l), right(r), action(a) {
+			: left(l), right(r){
 
 			id = production_t::prod_id_size++;
 		}
@@ -113,10 +144,6 @@ namespace gram {
 				result += sym.name + " ";
 			}
 
-			// TODO
-			//if (!action.empty()) {
-			//	result += "{" + action + "}";
-			//}
 			return result;
 		}
 
@@ -299,6 +326,7 @@ namespace gram {
 		item_set_id_t id;
 
 		lr0_item_set(int set_id = -1) : id(set_id) {}
+		lr0_item_set(const lr0_item_set& other) : id(other.id), items(other.items) {}
 
 		bool operator==(const lr0_item_set& other) const {
 			std::set<std::pair<production_id_t, int>> core_items, other_core_items;
@@ -383,6 +411,7 @@ namespace gram {
 		item_set_id_t id;
 
 		lalr1_item_set(int set_id = -1) : id(set_id) {}
+		lalr1_item_set(const lalr1_item_set& other) : id(other.id), items(other.items) {}
 
 		bool operator==(const lalr1_item_set& other) const {
 			std::set<std::pair<production_id_t, int>> core_items, other_core_items;
@@ -490,98 +519,6 @@ namespace gram {
 		}
 	};
 
-	class lalr1_parsing_table {
-
-	private:
-
-		// action table: state x terminal -> action
-		std::vector<std::unordered_map<symbol_t, action_t, symbol_hasher>> action_table;
-
-		// goto table: state x non-terminal -> state
-		std::vector<std::unordered_map<symbol_t, item_set_id_t, symbol_hasher>> goto_table;
-
-		// production info: production_id -> (left_symbol, right_size)
-		std::vector<std::pair<symbol_t, size_t>> productions_info;
-
-	public:
-
-		lalr1_parsing_table(int num_states, const std::vector<production_t>& productions)
-		: action_table(num_states), goto_table(num_states) 
-		{
-			for (const auto& prod : productions) {
-
-				// initialize production info
-				productions_info.emplace_back(prod.left, prod.right.size());
-			}
-		}
-
-		void set_action(item_set_id_t state, const symbol_t& sym, const action_t& action) {
-			action_table[state][sym] = action;
-		}
-
-		action_t get_action(int state, const symbol_t& sym) const {
-			auto it = action_table[state].find(sym);
-			if (it != action_table[state].end()) {
-				return it->second;
-			}
-			return action_t(action_type_t::ERROR, -1);
-		}
-
-		void set_goto(item_set_id_t state, const symbol_t& sym, item_set_id_t next_state) {
-			goto_table[state][sym] = next_state;
-		}
-
-		int get_goto(int state, const symbol_t& sym) const {
-			auto it = goto_table[state].find(sym);
-			if (it != goto_table[state].end()) {
-				return it->second;
-			}
-			return -1;
-		}
-
-		//std::pair<symbol_t, size_t> get_production_info(production_id_t prod_id) const {
-		//	if (prod_id >= 0 && prod_id < productions_info.size()) {
-		//		return productions_info[prod_id];
-		//	}
-		//	return { symbol_t(), 0 };
-		//}
-
-		size_t num_states() const {
-			return action_table.size();
-		}
-
-		void to_string() const {
-			std::cout << "LALR(1) Parsing Table:" << std::endl;
-			for (size_t state = 0; state < action_table.size(); state++) {
-				std::cout << "State " << state << ":" << std::endl;
-				std::cout << "  Actions:" << std::endl;
-				for (const auto& [sym, action] : action_table[state]) {
-					std::string action_str;
-					switch (action.type) {
-					case action_type_t::SHIFT:
-						action_str = "S" + std::to_string(action.value);
-						break;
-					case action_type_t::REDUCE:
-						action_str = "R" + std::to_string(action.value);
-						break;
-					case action_type_t::ACCEPT:
-						action_str = "ACC";
-						break;
-					default:
-						action_str = "ERR";
-						break;
-					}
-					std::cout << "    " << sym.name << " : " << action_str << std::endl;
-				}
-				std::cout << "  Gotos:" << std::endl;
-				for (const auto& [sym, next_state] : goto_table[state]) {
-					std::cout << "    " << sym.name << " : " << next_state << std::endl;
-				}
-			}
-		}
-
-	};
-
 
 	class grammar {
 	public:
@@ -599,9 +536,12 @@ namespace gram {
 		std::unordered_map<symbol_t, std::unordered_set<symbol_t, symbol_hasher>, symbol_hasher> follow_sets;
 
 
+
+		std::unordered_map<item_set_id_t, std::unordered_map<parse::symbol_t, parse::parser_action_t, parse::symbol_hasher>> action_table;
 		std::unordered_map<std::pair<item_set_id_t, symbol_t>, item_set_id_t, pair_item_set_symbol_hasher> goto_table;
 
 		std::vector<std::shared_ptr<lr0_item_set>> lr0_states;
+		std::unordered_map<std::pair<item_set_id_t, symbol_t>, item_set_id_t, pair_item_set_symbol_hasher> lr0_goto_cache_table;
 		std::vector<std::shared_ptr<lalr1_item_set>> lalr1_states;
 
 
@@ -645,9 +585,9 @@ namespace gram {
 			return terminals;
 		}
 
-		void add_production(const symbol_t& left, const std::vector<symbol_t>& right, const action_t& action = {}) {
+		void add_production(const symbol_t& left, const std::vector<symbol_t>& right) {
 
-			std::shared_ptr<production_t> prod = std::make_shared<production_t>(left, right, action);
+			std::shared_ptr<production_t> prod = std::make_shared<production_t>(left, right);
 			productions[left].push_back(prod);
 			non_terminals.insert(left);
 
@@ -694,9 +634,13 @@ namespace gram {
 		void initialize_lalr1_states();
 
 		void propagate_lookaheads(
-			const lalr1_item_t& i, const gram::symbol_t& X, item_set_id_t set_id,
+			const lalr1_item_t& i, const parse::symbol_t& X, item_set_id_t set_id,
 			std::unordered_map<item_id_t, std::vector<std::pair<item_set_id_t, item_id_t>>>& propagation_graph
 		);
+
+		void set_lalr1_items_lookaheads();
+
+		void build_action_table();
 
 		void build();
 
@@ -706,6 +650,259 @@ namespace gram {
 				result += state->to_string() + "\n";
 			}
 			return result;
+		}
+
+		std::string action_table_to_string() const {
+			std::stringstream ss;
+
+			// 收集所有状态ID并排序
+			std::vector<item_set_id_t> state_ids;
+			for (const auto& state_entry : action_table) {
+				state_ids.push_back(state_entry.first);
+			}
+			std::sort(state_ids.begin(), state_ids.end());
+
+			// 收集所有符号并排序（按名称）
+			std::vector<parse::symbol_t> symbols;
+			std::unordered_set<std::string> symbol_names;
+
+			for (const auto& state_entry : action_table) {
+				for (const auto& action_entry : state_entry.second) {
+					if (symbol_names.find(action_entry.first.name) == symbol_names.end()) {
+						symbols.push_back(action_entry.first);
+						symbol_names.insert(action_entry.first.name);
+					}
+				}
+			}
+
+			// 按符号名称排序
+			std::sort(symbols.begin(), symbols.end(),
+				[](const parse::symbol_t& a, const parse::symbol_t& b) {
+					return a.name < b.name;
+				});
+
+			// 输出表头
+			ss << "ACTION Table:\n";
+			ss << std::setw(8) << "State";
+			for (const auto& sym : symbols) {
+				ss << std::setw(12) << sym.name;
+			}
+			ss << "\n";
+
+			// 输出每个状态的行
+			for (const auto& state_id : state_ids) {
+				ss << std::setw(8) << state_id;
+
+				for (const auto& sym : symbols) {
+					auto state_it = action_table.find(state_id);
+					if (state_it != action_table.end()) {
+						auto action_it = state_it->second.find(sym);
+						if (action_it != state_it->second.end()) {
+							ss << std::setw(12) << action_it->second.to_string();
+						}
+						else {
+							ss << std::setw(12) << "";
+						}
+					}
+					else {
+						ss << std::setw(12) << "";
+					}
+				}
+				ss << "\n";
+			}
+
+			return ss.str();
+		}
+
+		std::string action_table_to_string_detailed() const {
+			std::stringstream ss;
+
+			ss << "Detailed ACTION Table:\n";
+			ss << "======================\n";
+
+			// 收集所有状态ID并排序
+			std::vector<item_set_id_t> state_ids;
+			for (const auto& state_entry : action_table) {
+				state_ids.push_back(state_entry.first);
+			}
+			std::sort(state_ids.begin(), state_ids.end());
+
+			for (const auto& state_id : state_ids) {
+				ss << "State " << state_id << ":\n";
+
+				auto state_it = action_table.find(state_id);
+				if (state_it != action_table.end()) {
+					// 收集符号并排序
+					std::vector<parse::symbol_t> symbols;
+					for (const auto& action_entry : state_it->second) {
+						symbols.push_back(action_entry.first);
+					}
+
+					std::sort(symbols.begin(), symbols.end(),
+						[](const parse::symbol_t& a, const parse::symbol_t& b) {
+							return a.name < b.name;
+						});
+
+					for (const auto& sym : symbols) {
+						auto action_it = state_it->second.find(sym);
+						if (action_it != state_it->second.end()) {
+							ss << "  " << std::setw(10) << sym.name << " : "
+								<< action_it->second.to_string() << "\n";
+						}
+					}
+				}
+				ss << "\n";
+			}
+			
+			return ss.str();
+		}
+
+		std::string goto_table_to_string() const {
+			std::stringstream ss;
+
+			// 收集所有状态ID
+			std::set<item_set_id_t> state_ids;
+			std::set<symbol_t> symbols;
+
+			for (const auto& entry : goto_table) {
+				state_ids.insert(entry.first.first);
+				symbols.insert(entry.first.second);
+			}
+
+			// 转换为排序后的向量以便有序输出
+			std::vector<item_set_id_t> sorted_states(state_ids.begin(), state_ids.end());
+			std::sort(sorted_states.begin(), sorted_states.end());
+
+			std::vector<symbol_t> sorted_symbols(symbols.begin(), symbols.end());
+			std::sort(sorted_symbols.begin(), sorted_symbols.end(),
+				[](const symbol_t& a, const symbol_t& b) {
+					return a.name < b.name;
+				});
+
+			// 输出表头
+			ss << "GOTO Table:\n";
+			ss << std::setw(8) << "State";
+			for (const auto& sym : sorted_symbols) {
+				ss << std::setw(12) << sym.name;
+			}
+			ss << "\n\n";
+
+			// 输出每个状态的行
+			for (const auto& state : sorted_states) {
+				ss << std::setw(8) << state;
+
+				for (const auto& sym : sorted_symbols) {
+					auto key = std::make_pair(state, sym);
+					auto it = goto_table.find(key);
+					if (it != goto_table.end()) {
+						if (it->second == 0)
+							ss << std::setw(12) << " ";
+						else
+							ss << std::setw(12) << it->second;
+					}
+					else {
+						ss << std::setw(12) << "";
+					}
+				}
+				ss << "\n\n";
+			}
+
+			return ss.str();
+		}
+
+		// 如果需要更详细的输出，可以添加一个更详细的版本
+		std::string goto_table_to_string_detailed() const {
+			std::stringstream ss;
+
+			ss << "Detailed GOTO Table:\n";
+			ss << "====================\n";
+
+			// 收集所有状态ID并排序
+			std::set<item_set_id_t> state_ids;
+			for (const auto& entry : goto_table) {
+				state_ids.insert(entry.first.first);
+			}
+
+			std::vector<item_set_id_t> sorted_states(state_ids.begin(), state_ids.end());
+			std::sort(sorted_states.begin(), sorted_states.end());
+
+			for (const auto& state : sorted_states) {
+				ss << "State " << state << ":\n";
+
+				// 收集该状态的所有GOTO条目
+				std::vector<std::pair<symbol_t, item_set_id_t>> entries;
+				for (const auto& entry : goto_table) {
+					if (entry.first.first == state) {
+						entries.emplace_back(entry.first.second, entry.second);
+					}
+				}
+
+				// 按符号名称排序
+				std::sort(entries.begin(), entries.end(),
+					[](const std::pair<symbol_t, item_set_id_t>& a,
+						const std::pair<symbol_t, item_set_id_t>& b) {
+							return a.first.name < b.first.name;
+					});
+
+				// 输出每个GOTO条目
+				for (const auto& entry : entries) {
+					ss << "  " << std::setw(10) << entry.first.name << " : "
+						<< entry.second << "\n";
+				}
+
+				ss << "\n";
+			}
+
+			return ss.str();
+		}
+
+		// 按符号分组的GOTO表视图
+		std::string goto_table_to_string_by_symbol() const {
+			std::stringstream ss;
+
+			ss << "GOTO Table Grouped by Symbol:\n";
+			ss << "=============================\n";
+
+			// 收集所有符号并排序
+			std::set<symbol_t> symbols;
+			for (const auto& entry : goto_table) {
+				symbols.insert(entry.first.second);
+			}
+
+			std::vector<symbol_t> sorted_symbols(symbols.begin(), symbols.end());
+			std::sort(sorted_symbols.begin(), sorted_symbols.end(),
+				[](const symbol_t& a, const symbol_t& b) {
+					return a.name < b.name;
+				});
+
+			for (const auto& sym : sorted_symbols) {
+				ss << "Symbol " << sym.name << ":\n";
+
+				// 收集该符号的所有GOTO条目
+				std::vector<std::pair<item_set_id_t, item_set_id_t>> entries;
+				for (const auto& entry : goto_table) {
+					if (entry.first.second == sym) {
+						entries.emplace_back(entry.first.first, entry.second);
+					}
+				}
+
+				// 按源状态排序
+				std::sort(entries.begin(), entries.end(),
+					[](const std::pair<item_set_id_t, item_set_id_t>& a,
+						const std::pair<item_set_id_t, item_set_id_t>& b) {
+							return a.first < b.first;
+					});
+
+				// 输出每个GOTO条目
+				for (const auto& entry : entries) {
+					ss << "  " << std::setw(4) << entry.first << " -> "
+						<< entry.second << "\n";
+				}
+
+				ss << "\n";
+			}
+
+			return ss.str();
 		}
 
 		friend std::ostream& operator<<(std::ostream& os, const grammar& g) {
@@ -725,123 +922,114 @@ namespace gram {
 			return os;
 		}
 	};
-}
-
-namespace parse {
-
-	struct pair_int_symbol_hasher {
-		size_t operator()(const std::pair<int, gram::symbol_t>& p) const {
-			size_t h1 = std::hash<int>()(p.first);
-			size_t h2 = gram::symbol_hasher()(p.second);
-			return h1 ^ (h2 + 0x9e3779b9 + (h1 << 6) + (h1 >> 2));
-		}
-	};
-
-	class lalr1_parser_table {
-	public:
-
-		std::unordered_map<std::pair<int, gram::symbol_t>, gram::action_t, pair_int_symbol_hasher> action_table;
-		std::unordered_map<std::pair<item_set_id_t, gram::symbol_t>, item_set_id_t, pair_int_symbol_hasher> goto_table;
-		//std::unordered_map < std::pair<int, grammar::symbol>, action,
-		//    [](const std::pair<int, grammar::symbol>& p) {
-		//    return std::hash<int>()(p.first) ^ std::hash<std::string>()(p.second.name);
-		//    } > action_table;
-
-		//std::unordered_map < std::pair<int, grammar::symbol>, int,
-		//    [](const std::pair<int, grammar::symbol>& p) {
-		//    return std::hash<int>()(p.first) ^ std::hash<std::string>()(p.second.name);
-		//    } > goto_table;
-
-	};
 
 	class lexer {
 	private:
-		std::vector<std::pair<std::regex, gram::symbol_t>> token_patterns;
-		gram::symbol_t end_marker{ "$", gram::symbol_type_t::TERMINAL };
+		std::vector<std::pair<std::regex, parse::symbol_t>> token_patterns;
+		parse::symbol_t end_marker{ "$", parse::symbol_type_t::TERMINAL };
 
 	public:
 		lexer() {
-			add_token_pattern("\\bint\\b", gram::symbol_t("int", gram::symbol_type_t::TERMINAL));
-			add_token_pattern("\\bfloat\\b", gram::symbol_t("float", gram::symbol_type_t::TERMINAL));
-			add_token_pattern("\\bchar\\b", gram::symbol_t("char", gram::symbol_type_t::TERMINAL));
-			add_token_pattern("\\bbool\\b", gram::symbol_t("bool", gram::symbol_type_t::TERMINAL));
-			add_token_pattern("\\bif\\b", gram::symbol_t("if", gram::symbol_type_t::TERMINAL));
-			add_token_pattern("\\belse\\b", gram::symbol_t("else", gram::symbol_type_t::TERMINAL));
-			add_token_pattern("\\bwhile\\b", gram::symbol_t("while", gram::symbol_type_t::TERMINAL));
-			add_token_pattern("\\breturn\\b", gram::symbol_t("return", gram::symbol_type_t::TERMINAL));
-			add_token_pattern("[a-zA-Z_][a-zA-Z0-9_]*", gram::symbol_t("id", gram::symbol_type_t::TERMINAL));
-			add_token_pattern("[0-9]+", gram::symbol_t("int_lit", gram::symbol_type_t::TERMINAL));
-			add_token_pattern("[0-9]+\\.[0-9]*", gram::symbol_t("float_lit", gram::symbol_type_t::TERMINAL));
-			add_token_pattern("'.'", gram::symbol_t("char_lit", gram::symbol_type_t::TERMINAL));
-			add_token_pattern("\\btrue\\b|\\bfalse\\b", gram::symbol_t("bool_lit", gram::symbol_type_t::TERMINAL));
-			add_token_pattern("\\+", gram::symbol_t("+", gram::symbol_type_t::TERMINAL));
-			add_token_pattern("\\-", gram::symbol_t("-", gram::symbol_type_t::TERMINAL));
-			add_token_pattern("\\*", gram::symbol_t("*", gram::symbol_type_t::TERMINAL));
-			add_token_pattern("\\/", gram::symbol_t("/", gram::symbol_type_t::TERMINAL));
-			add_token_pattern("\\=", gram::symbol_t("=", gram::symbol_type_t::TERMINAL));
-			add_token_pattern("\\==", gram::symbol_t("==", gram::symbol_type_t::TERMINAL));
-			add_token_pattern("\\!=", gram::symbol_t("!=", gram::symbol_type_t::TERMINAL));
-			add_token_pattern("\\<", gram::symbol_t("<", gram::symbol_type_t::TERMINAL));
-			add_token_pattern("\\>", gram::symbol_t(">", gram::symbol_type_t::TERMINAL));
-			add_token_pattern("\\<=", gram::symbol_t("<=", gram::symbol_type_t::TERMINAL));
-			add_token_pattern("\\>=", gram::symbol_t(">=", gram::symbol_type_t::TERMINAL));
-			add_token_pattern("\\&\\&", gram::symbol_t("&&", gram::symbol_type_t::TERMINAL));
-			add_token_pattern("\\|\\|", gram::symbol_t("||", gram::symbol_type_t::TERMINAL));
-			add_token_pattern("\\!", gram::symbol_t("!", gram::symbol_type_t::TERMINAL));
-			add_token_pattern("\\(", gram::symbol_t("(", gram::symbol_type_t::TERMINAL));
-			add_token_pattern("\\)", gram::symbol_t(")", gram::symbol_type_t::TERMINAL));
-			add_token_pattern("\\{", gram::symbol_t("{", gram::symbol_type_t::TERMINAL));
-			add_token_pattern("\\}", gram::symbol_t("}", gram::symbol_type_t::TERMINAL));
-			add_token_pattern("\\;", gram::symbol_t(";", gram::symbol_type_t::TERMINAL));
-			add_token_pattern("\\,", gram::symbol_t(",", gram::symbol_type_t::TERMINAL));
+			add_token_pattern("\\bint\\b", parse::symbol_t("int", parse::symbol_type_t::TERMINAL));
+			add_token_pattern("\\bfloat\\b", parse::symbol_t("float", parse::symbol_type_t::TERMINAL));
+			add_token_pattern("\\bchar\\b", parse::symbol_t("char", parse::symbol_type_t::TERMINAL));
+			add_token_pattern("\\bbool\\b", parse::symbol_t("bool", parse::symbol_type_t::TERMINAL));
+			add_token_pattern("\\bif\\b", parse::symbol_t("if", parse::symbol_type_t::TERMINAL));
+			add_token_pattern("\\belse\\b", parse::symbol_t("else", parse::symbol_type_t::TERMINAL));
+			add_token_pattern("\\bwhile\\b", parse::symbol_t("while", parse::symbol_type_t::TERMINAL));
+			add_token_pattern("\\breturn\\b", parse::symbol_t("return", parse::symbol_type_t::TERMINAL));
+			add_token_pattern("[a-zA-Z_][a-zA-Z0-9_]*", parse::symbol_t("id", parse::symbol_type_t::TERMINAL));
+			add_token_pattern("[0-9]+", parse::symbol_t("int_lit", parse::symbol_type_t::TERMINAL));
+			add_token_pattern("[0-9]+\\.[0-9]*", parse::symbol_t("float_lit", parse::symbol_type_t::TERMINAL));
+			add_token_pattern("'.'", parse::symbol_t("char_lit", parse::symbol_type_t::TERMINAL));
+			add_token_pattern("\\btrue\\b|\\bfalse\\b", parse::symbol_t("bool_lit", parse::symbol_type_t::TERMINAL));
+			add_token_pattern("\\+", parse::symbol_t("+", parse::symbol_type_t::TERMINAL));
+			add_token_pattern("\\-", parse::symbol_t("-", parse::symbol_type_t::TERMINAL));
+			add_token_pattern("\\*", parse::symbol_t("*", parse::symbol_type_t::TERMINAL));
+			add_token_pattern("\\/", parse::symbol_t("/", parse::symbol_type_t::TERMINAL));
+			add_token_pattern("\\=", parse::symbol_t("=", parse::symbol_type_t::TERMINAL));
+			add_token_pattern("\\==", parse::symbol_t("==", parse::symbol_type_t::TERMINAL));
+			add_token_pattern("\\!=", parse::symbol_t("!=", parse::symbol_type_t::TERMINAL));
+			add_token_pattern("\\<", parse::symbol_t("<", parse::symbol_type_t::TERMINAL));
+			add_token_pattern("\\>", parse::symbol_t(">", parse::symbol_type_t::TERMINAL));
+			add_token_pattern("\\<=", parse::symbol_t("<=", parse::symbol_type_t::TERMINAL));
+			add_token_pattern("\\>=", parse::symbol_t(">=", parse::symbol_type_t::TERMINAL));
+			add_token_pattern("\\&\\&", parse::symbol_t("&&", parse::symbol_type_t::TERMINAL));
+			add_token_pattern("\\|\\|", parse::symbol_t("||", parse::symbol_type_t::TERMINAL));
+			add_token_pattern("\\!", parse::symbol_t("!", parse::symbol_type_t::TERMINAL));
+			add_token_pattern("\\(", parse::symbol_t("(", parse::symbol_type_t::TERMINAL));
+			add_token_pattern("\\)", parse::symbol_t(")", parse::symbol_type_t::TERMINAL));
+			add_token_pattern("\\{", parse::symbol_t("{", parse::symbol_type_t::TERMINAL));
+			add_token_pattern("\\}", parse::symbol_t("}", parse::symbol_type_t::TERMINAL));
+			add_token_pattern("\\;", parse::symbol_t(";", parse::symbol_type_t::TERMINAL));
+			add_token_pattern("\\,", parse::symbol_t(",", parse::symbol_type_t::TERMINAL));
 		}
 
-		void add_token_pattern(const std::string& pattern, const gram::symbol_t& symbol) {
+		void add_token_pattern(const std::string& pattern, const parse::symbol_t& symbol) {
 			token_patterns.emplace_back(std::regex(pattern), symbol);
 		}
 
-		std::vector<std::pair<gram::symbol_t, std::string>> tokenize(const std::string& input);
+		std::vector<std::pair<parse::symbol_t, std::string>> tokenize(const std::string& input);
 	};
 
 	class lr_parser {
 	private:
-		lalr1_parser_table table;
-		gram::grammar grammar;
+		std::unique_ptr<parse::grammar> grammar;
+
+		std::stack<item_set_id_t> state_stack;
+		std::stack<parse::symbol_t> symbol_stack;
+	
+
+		std::vector<std::string> parse_history;
 		std::vector<std::string> error_msg;
 
 	public:
-		lr_parser(const gram::grammar& g, const lalr1_parser_table& t) : grammar(g), table(t) {}
+		lr_parser(std::unique_ptr<parse::grammar> g) {
+			grammar = std::move(g);
+			state_stack.push(0);
+		}
 
-		bool parse(const std::vector<std::pair<gram::symbol_t, std::string>>& tokens);
+		struct parse_result {
+			bool success;
+			std::string error_message;
+			std::vector<std::string> parse_history;
+		};
+
+		parse_result parse(const std::vector<parse::symbol_t>& input_tokens);
 		const std::vector<std::string>& get_error() const { return error_msg; }
+		const std::vector<std::string>& get_parse_history() const {
+			return parse_history;
+		}
 
 	private:
-		gram::production_t find_production_by_id(int id) const;
-
 		bool error_recovery(
 			std::stack<int>& state_stack,
-			std::stack<gram::symbol_t>& symbol_stack,
-			const std::vector<std::pair<gram::symbol_t, std::string>>& tokens,
+			std::stack<parse::symbol_t>& symbol_stack,
+			const std::vector<std::pair<parse::symbol_t, std::string>>& tokens,
 			size_t& token_index
 		);
 
 		void add_error(const std::string& message);
 		std::any execute_semantic_action(
-			const gram::production_t& prod,
+			const parse::production_t& prod,
 			const std::vector<std::any>& children
 		);
 	};
 
-	class lr_automation_builder {
-	public:
-		static void build(gram::grammar& grammar,
-			std::vector<gram::lr0_item_set>& states,
-			lalr1_parser_table& table,
-			bool lalr = false
-		);
-	};
 }
 
-std::unique_ptr<gram::grammar> grammar_parser(const std::string& filename);
+//namespace parse {
+//
+//	class lr_automation_builder {
+//	public:
+//		static void build(gram::grammar& grammar,
+//			std::vector<gram::lr0_item_set>& states,
+//			//lalr1_parser_table& table,
+//			bool lalr = false
+//		);
+//	};
+//}
+
+std::unique_ptr<parse::grammar> grammar_parser(const std::string& filename);
 
 #endif  // __LR_PARSER_H__
