@@ -133,6 +133,7 @@
   </ItemGroup>
   <ItemGroup>
     <Text Include="gram_exp01.txt" />
+    <Text Include="gram_exp02.txt" />
   </ItemGroup>
   <ItemGroup>
     <Natvis Include="NatvisFile.natvis" />

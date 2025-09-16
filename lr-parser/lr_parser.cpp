@@ -1,4 +1,4 @@
-#include "framework.h"
+ï»¿#include "framework.h"
 #include "lr_parser.h"
 
 #include <iostream>
@@ -15,9 +15,8 @@
 
 
 production_id_t gram::production_t::prod_id_size = 1;
-item_set_id_t gram::lr0_item_set::lr0_item_set_size = 0;
 
-static std::string trim(const std::string & str) {
+static std::string trim(const std::string& str) {
 	size_t start = str.find_first_not_of(" \t\n\r");
 	size_t end = str.find_last_not_of(" \t\n\r");
 	if (start == std::string::npos || end == std::string::npos) {
@@ -31,10 +30,10 @@ static size_t find_arrow_position(const std::string& line)
 	// Try to find different arrow representations
 	size_t pos = line.find("->");
 	if (pos != std::string::npos) return pos;
-	pos = line.find("¡ú");
+	pos = line.find("â†’");
 	if (pos != std::string::npos) return pos;
 	// Try to find UTF-8 encoded arrow (may be multi-byte character)
-	pos = line.find("\xE2\x86\x92"); // UTF-8 encoded ¡ú
+	pos = line.find("\xE2\x86\x92"); // UTF-8 encoded â†’
 	if (pos != std::string::npos) return pos;
 	return std::string::npos;
 }
@@ -44,9 +43,9 @@ static size_t get_arrow_length(const std::string& line, size_t arrow_pos)
 	if (arrow_pos == std::string::npos) return 0;
 	// Check if it's "->"
 	if (line.substr(arrow_pos, 2) == "->") return 2;
-	// Check if it's "¡ú" (single character)
-	if (line.substr(arrow_pos, 1) == "¡ú") return 1;
-	// Check if it's UTF-8 encoded ¡ú (three bytes)
+	// Check if it's "â†’" (single character)
+	if (line.substr(arrow_pos, 1) == "â†’") return 1;
+	// Check if it's UTF-8 encoded â†’ (three bytes)
 	if (arrow_pos + 2 < line.size() &&
 		line.substr(arrow_pos, 3) == "\xE2\x86\x92") return 3;
 	return 0;
@@ -88,7 +87,7 @@ static std::vector<std::string> split(const std::string& str, char delimiter)
 static bool is_non_terminal(const std::string& symbol)
 {
 	if (symbol.empty()) return false;
-	if (symbol == "¦Å" || symbol == "epsilon") return true;
+	if (symbol == "Îµ" || symbol == "epsilon") return true;
 	// Check if it's enclosed in <>
 	if (symbol.size() >= 2 && symbol[0] == '<' && symbol[symbol.size() - 1] == '>') {
 		return true;
@@ -106,11 +105,11 @@ static std::string extract_symbol_name(const std::string& symbol)
 }
 
 
-gram::grammar grammar_parser(const std::string& filename) {
+std::unique_ptr<gram::grammar> grammar_parser(const std::string& filename) {
 
 
-	gram::grammar grammar;
-	
+	std::unique_ptr<gram::grammar> grammar = std::make_unique<gram::grammar>();
+
 	std::ifstream file(filename);
 
 	if (!file.is_open())
@@ -158,11 +157,11 @@ gram::grammar grammar_parser(const std::string& filename) {
 		// set the start symbol (the first non-terminal)
 		if (first_production) {
 			first_production = false;
-			grammar.start_symbol = gram::symbol_t(left_symbol, gram::symbol_type_t::NON_TERMINAL);
+			grammar->start_symbol = gram::symbol_t(left_symbol, gram::symbol_type_t::NON_TERMINAL);
 		}
 
 		// record the non-terminal
-		grammar.non_terminals.insert(gram::symbol_t(left_symbol, gram::symbol_type_t::NON_TERMINAL));
+		grammar->non_terminals.insert(gram::symbol_t(left_symbol, gram::symbol_type_t::NON_TERMINAL));
 
 		// handle multiple productions on the right side (separated by |)
 		std::vector<std::string> alternatives;
@@ -185,9 +184,9 @@ gram::grammar grammar_parser(const std::string& filename) {
 		// handle each production
 		for (const auto& alt : alternatives) {
 			std::vector<gram::symbol_t> right_symbols;
-			if (alt == "¦Å" || alt == "epsilon" || alt.empty()) {
+			if (alt == "Îµ" || alt == "epsilon" || alt.empty()) {
 				// empty production
-				right_symbols.push_back(grammar.epsilon);
+				right_symbols.push_back(grammar->epsilon);
 			}
 			else {
 				// split the right side symbols by space
@@ -201,19 +200,19 @@ gram::grammar grammar_parser(const std::string& filename) {
 					gram::symbol_t symbol;
 					if (is_non_terminal(token)) {
 						symbol = gram::symbol_t(symbol_name, gram::symbol_type_t::NON_TERMINAL);
-						grammar.non_terminals.insert(symbol);
+						grammar->non_terminals.insert(symbol);
 					}
 					else {
 						symbol = gram::symbol_t(symbol_name, gram::symbol_type_t::TERMINAL);
-						if (!(symbol == grammar.epsilon)) {
-							grammar.terminals.insert(symbol);
+						if (!(symbol == grammar->epsilon)) {
+							grammar->terminals.insert(symbol);
 						}
 					}
 					right_symbols.push_back(symbol);
 				}
 			}
 			// add to the production set
-			grammar.add_production(
+			grammar->add_production(
 				gram::symbol_t(left_symbol, gram::symbol_type_t::NON_TERMINAL),
 				right_symbols
 			);
@@ -222,7 +221,7 @@ gram::grammar grammar_parser(const std::string& filename) {
 	}
 
 	file.close();
-	
+
 	return grammar;
 }
 
@@ -244,11 +243,11 @@ std::shared_ptr<gram::lalr1_item_set> gram::grammar::closure(const gram::lalr1_i
 		changed = false;
 
 		// Copy current items to avoid modification during iteration
-		std::unordered_set<lalr1_item_t, lr0_item_hasher>& current_items = new_I->get_items(); 
+		std::unordered_set<lalr1_item_t, lr0_item_hasher>& current_items = new_I->get_items();
 
 		for (const gram::lalr1_item_t& item : current_items) {
 
-#ifdef __DEBUG__
+#ifdef __DEBUG_OUTPUT__
 			//std::cout << "Current item: " << item.to_string() << std::endl;
 #endif
 
@@ -258,7 +257,7 @@ std::shared_ptr<gram::lalr1_item_set> gram::grammar::closure(const gram::lalr1_i
 			}
 
 			item_handled[item] = true; // Mark as processed
-			
+
 
 			gram::symbol_t next_sym = item.next_symbol();
 
@@ -282,7 +281,7 @@ std::shared_ptr<gram::lalr1_item_set> gram::grammar::closure(const gram::lalr1_i
 
 				for (const std::shared_ptr<gram::production_t> prod : prods) {
 
-                    gram::lalr1_item_t new_item(prod, 0, lookaheads);
+					gram::lalr1_item_t new_item(prod, 0, lookaheads);
 
 					const lalr1_item_t* existing_item = new_I->find_item(new_item.id);
 
@@ -315,7 +314,7 @@ std::shared_ptr<gram::lalr1_item_set> gram::grammar::closure(const gram::lalr1_i
 
 	} while (changed);
 
-#ifdef __DEBUG__
+#ifdef __DEBUG_OUTPUT__
 	//std::cout << "LALR(1) Closure of start state:" << std::endl;
 	//std::cout << *new_I << std::endl;
 #endif
@@ -366,7 +365,7 @@ std::shared_ptr<gram::lr0_item_set> gram::grammar::lr0_closure(const lr0_item_se
 					gram::lr0_item_t new_item(prod, 0);
 
 					// Check if the new item already exists
-						
+
 					const gram::lr0_item_t* found = new_I->find_item(new_item);
 					if (found == nullptr) {
 						new_I->add_items(new_item);
@@ -403,22 +402,21 @@ std::shared_ptr<gram::lr0_item_set> gram::grammar::lr0_go_to(const lr0_item_set&
 	return lr0_closure(*result);
 }
 
-//std::vector<std::shared_ptr<gram::lr0_item_set>> gram::grammar::build_lr0_states()
 void gram::grammar::build_lr0_states()
 {
 	//std::vector<std::shared_ptr<gram::lr0_item_set>> lr0_states;
 
 	// Create the augmented grammar
-    std::shared_ptr<gram::production_t> augmented_prod = std::make_shared<gram::production_t>(
-        gram::symbol_t(start_symbol.name + "'", gram::symbol_type_t::NON_TERMINAL),
-        std::vector<gram::symbol_t>{ start_symbol },
+	std::shared_ptr<gram::production_t> augmented_prod = std::make_shared<gram::production_t>(
+		gram::symbol_t(start_symbol.name + "'", gram::symbol_type_t::NON_TERMINAL),
+		std::vector<gram::symbol_t>{ start_symbol },
 		action_t{}  // Empty action
-    );
+	);
 
 	// set the start symbol to the new augmented start symbol
 	augmented_prod->id = AUGMENTED_GRAMMAR_PROD_ID;
 	productions.insert({ augmented_prod->left, { augmented_prod } });
-	
+
 	// initialize the first item set with the augmented production
 	lr0_item_set start_set;
 	start_set.id = 0;
@@ -466,8 +464,8 @@ void gram::grammar::build_lr0_states()
 
 	}
 
-#ifdef __DEBUG__
-	
+#ifdef __DEBUG_OUTPUT__
+
 	std::cout << "Total LR(0) states: " << lr0_states.size() << std::endl;
 	for (const auto& state : lr0_states) {
 		std::cout << *state << std::endl;
@@ -511,7 +509,6 @@ void gram::grammar::build_lr0_states()
 	//return lr0_states;
 }
 
-
 /*
 	We initialize the LALR(1) states based on the LR(0) states.
 	All lalr(1) items are initialized with empty lookahead sets,
@@ -519,7 +516,6 @@ void gram::grammar::build_lr0_states()
 */
 void gram::grammar::initialize_lalr1_states() {
 
-	//lr0_states = build_lr0_states();
 	lalr1_states.resize(lr0_states.size());
 
 	lalr1_states[0] = std::make_shared<lalr1_item_set>(0);
@@ -549,14 +545,172 @@ void gram::grammar::initialize_lalr1_states() {
 }
 
 /*
+	We apple this routine for each kernel item and each symbol( terminals and non terminals).
+*/
+void gram::grammar::propagate_lookaheads(
+	const lalr1_item_t& i, const gram::symbol_t& X, item_set_id_t set_id,
+	std::unordered_map<item_id_t, std::vector<std::pair<item_set_id_t, item_id_t>>>& propagation_graph
+)
+{
+#ifdef __DEBUG_OUTPUT__
+	std::cout << "Determining lookaheads for item: " << i.to_string() << " on symbol: " << X.name << " in state: " << set_id << std::endl;
+#endif
+
+
+	lalr1_item_set original_item_set;
+	original_item_set.add_items(i);
+	std::shared_ptr<lalr1_item_set> J = closure(original_item_set);
+
+	item_set_id_t target_item_set_id = goto_table[std::make_pair(set_id, X)];
+	for (const auto& item : lalr1_states[target_item_set_id]->get_items())
+		propagation_graph[i.id].push_back(std::make_pair(target_item_set_id, item.id));
+
+
+#ifdef __DEBUG_OUTPUT__
+	std::cout << "Closure B Items: \n" << J->to_string() << std::endl;
+#endif
+
+
+	for (auto& B : J->get_items()) {
+
+
+		if (B.dot_pos >= B.product->right.size() || B.next_symbol() != X)
+			continue;
+
+		auto goto_B = go_to(*J, X);
+
+#ifdef __DEBUG_OUTPUT__
+		std::cout << "Goto B Items: \n" << goto_B->to_string() << std::endl;
+#endif
+
+		for (auto& la : *B.lookaheads)
+		{
+
+			for (const auto& goto_B_item : goto_B->get_items())
+			{
+
+#ifdef __DEBUG_OUTPUT__
+				std::cout << "GOTO B item: " << goto_B_item.to_string() << std::endl;
+
+#endif
+				if (goto_B_item.product->id == B.product->id && goto_B_item.dot_pos == B.dot_pos + 1)
+				{
+
+					auto found = lalr1_states[target_item_set_id]->find_no_const_item(goto_B_item.id);
+					if (found != nullptr)
+					{
+
+						/*
+							We can obtain all the spontaneous generated lookaheads in J through closure( { i } ).						
+							So, we don't need to compute the first (Î´) in [Câ†’Î³Xâ‹…Î´,n]
+						*/
+
+						//std::vector<gram::symbol_t> beta_a;
+						//for (int i = B.dot_pos + 1; i < B.product->right.size(); i++) {
+						//	beta_a.push_back(B.product->right[i]);
+						//}
+						//std::unordered_set<gram::symbol_t, gram::symbol_hasher> lookaheads =
+						//	comp_first_of_sequence(beta_a, *B.lookaheads);
+						//lookaheads.insert(la);
+
+						//found->add_lookaheads(lookaheads);
+						found->add_lookahead(la);
+
+
+					}
+
+				}
+			}
+		}
+	}
+
+}
+
+void gram::grammar::build() {
+
+#ifdef __DEBUG_OUTPUT__
+	std::cout << "\n\n=============== LALR(1) Build Starting... ===============\n\n" << std::endl;
+#endif
+
+	build_lr0_states();
+	initialize_lalr1_states();
+
+	std::unordered_map<item_id_t, std::vector<std::pair<item_set_id_t, item_id_t>>> propagation_graph;
+
+#ifdef __DEBUG_OUTPUT__
+	std::cout << "\n\n=============== LALR(1) Parsing Table Building... ===============\n\n" << std::endl;
+#endif
+	for (item_set_id_t i = 0; i < lalr1_states.size(); i++)
+	{
+		for (const lalr1_item_t& lalr_i : lalr1_states[i]->get_items())
+		{
+			for (const auto& X : terminals)
+				propagate_lookaheads(lalr_i, X, i,
+					propagation_graph
+				);
+
+			for (const auto& X : non_terminals)
+				propagate_lookaheads(lalr_i, X, i,
+					propagation_graph
+				);
+		}
+
+
+	}
+
+#ifdef __DEBUG_OUTPUT__
+	std::cout << "LALR(1) States Built. Total States: " << lalr1_states.size() << std::endl;
+	std::cout << lalr1_states_to_string() << std::endl;
+#endif
+//	bool changed = true;
+//
+//	do
+//	{
+//
+//		changed = false;
+//		item_set_id_t i = 0;
+//
+//		// iterate all lalr1 items in all lalr1 states
+//		for (; i < lalr1_states.size(); i++)
+//		{
+//
+//#ifdef __DEBUG_OUTPUT__
+//			std::cout << lalr1_states[i]->to_string() << std::endl;
+//#endif
+//
+//			for (const lalr1_item_t& lalr_i : lalr1_states[i]->get_items())
+//			{
+//				for (auto& [to_item_set_id, item_id] : propagation_graph[lalr_i.id])
+//				{ 
+//					auto found = lalr1_states[to_item_set_id]->find_no_const_item(item_id);
+//					if (*found->lookaheads != *lalr_i.lookaheads)
+//						changed = found->add_lookaheads(*lalr_i.lookaheads);
+//				}
+//
+//			}
+//		}
+//
+//
+//	} while (changed);
+
+#ifdef __DEBUG__
+	std::cout << "LALR(1) States Built. Total States: " << lalr1_states.size() << std::endl;
+	std::cout << lalr1_states_to_string() << std::endl;
+#endif
+
+
+}
+
+
+/*
 ### Algorithm Features
 1. **Iteration until convergence**: Use a `do-while` loop until no new symbols are added to any FIRST set (`changed` is false)
 2. **Process the right part of the production**: For each production, check the symbols from left to right:
    - Encounter **terminal symbol**: Add it to the FIRST set of the left non-terminal symbol, and stop processing this production
-   - Upon encountering a **non-terminal symbol**: add its FIRST set (excluding ¦Å) to the FIRST set of the left non-terminal symbol
-	 - If the FIRST set of the non-terminal symbol contains ¦Å, continue to check the next symbol
+   - Upon encountering a **non-terminal symbol**: add its FIRST set (excluding Îµ) to the FIRST set of the left non-terminal symbol
+	 - If the FIRST set of the non-terminal symbol contains Îµ, continue to check the next symbol
 	 - Otherwise, stop processing this production rule
-3. **Handling the ¦Å case**: If all symbols in the production can derive ¦Å, add ¦Å to the FIRST set of the left nonterminal
+3. **Handling the Îµ case**: If all symbols in the production can derive Îµ, add Îµ to the FIRST set of the left nonterminal
 */
 void gram::grammar::comp_first_sets() {
 	bool changed = true;
@@ -625,10 +779,10 @@ void gram::grammar::comp_first_sets() {
 ### Algorithm Features
 1. **Processing symbol sequence**: For each symbol in the given sequence:
    - Encounter **terminator**: add it to the result set and stop processing
-   - Encountering a **non-terminal symbol**: add its FIRST set (excluding ¦Å) to the result set
-	 - If the FIRST set of the non-terminal symbol does not contain ¦Å, stop processing
+   - Encountering a **non-terminal symbol**: add its FIRST set (excluding Îµ) to the result set
+	 - If the FIRST set of the non-terminal symbol does not contain Îµ, stop processing
 	 - Otherwise, proceed to the next symbol
-2. **Handling ¦Å**: If all symbols in the sequence can derive ¦Å, add the passed-in look-ahead symbol to the result set
+2. **Handling Îµ**: If all symbols in the sequence can derive Îµ, add the passed-in look-ahead symbol to the result set
 */
 std::unordered_set<gram::symbol_t, gram::symbol_hasher> gram::grammar::comp_first_of_sequence(
 	const std::vector<gram::symbol_t>& sequence,

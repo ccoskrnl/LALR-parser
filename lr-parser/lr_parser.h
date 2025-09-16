@@ -124,12 +124,10 @@ namespace gram {
 
 	struct lr0_item_t {
 
-	//private:
 		std::shared_ptr<production_t> product;
 		int dot_pos;
 		item_id_t id;
 
-	//public:
 		
 		int get_dot_pos() const {
 			return dot_pos;
@@ -209,7 +207,6 @@ namespace gram {
 			: lr0_item_t(nullptr, 0), lookaheads(std::make_shared<std::unordered_set<symbol_t, symbol_hasher>>()) {
 		}
 
-		// No need for manual destructor
 
 		bool add_lookaheads(const std::unordered_set<symbol_t, symbol_hasher>& las) {
 			if (las.empty())
@@ -266,18 +263,17 @@ namespace gram {
 		}
 	};
 
-	//struct lalr1_item_hasher {
-	//	size_t operator()(const lalr1_item_t& item) const {
-
-	//		size_t h1 = std::hash<production_id_t>()(item.product->id);
-	//		size_t h2 = std::hash<int>()(item.dot_pos);
-	//		size_t h3 = 0;
-	//		for (const auto& sym : item.lookaheads) {
-	//			h3 ^= symbol_hasher()(sym) + 0x9e3779b9 + (h3 << 6) + (h3 >> 2);
-	//		}
-	//		return h1 ^ (h2 << 1);
-	//	}
-	//};
+	struct lalr1_item_hasher {
+		size_t operator()(const lalr1_item_t& item) const {
+			size_t h1 = std::hash<production_id_t>()(item.product->id);
+			size_t h2 = std::hash<int>()(item.dot_pos);
+			size_t h3 = 0;
+			for (const auto& sym : *item.lookaheads) {
+				h3 ^= symbol_hasher()(sym) + 0x9e3779b9 + (h3 << 6) + (h3 >> 2);
+			}
+			return h1 ^ (h2 << 1);
+		}
+	};
 
 	struct pair_item_id_symbol_hasher {
 		size_t operator()(const std::pair<item_id_t, symbol_t>& p) const {
@@ -287,17 +283,22 @@ namespace gram {
 		}
 	};
 
+	struct pair_items_state_item_id_hasher {
+		size_t operator()(const std::pair<item_set_id_t, item_id_t>& p) const {
+			size_t h1 = std::hash<item_set_id_t>()(p.first);
+			size_t h2 = std::hash<item_id_t>()(p.second);
+			return h1 ^ (h2 + 0x9e3779b9 + (h1 << 6) + (h1 >> 2));
+		}
+	};
+
 
 	class lr0_item_set {
-
-		static item_set_id_t lr0_item_set_size;
 
 	public:
 		std::unordered_set<lr0_item_t, lr0_item_hasher> items;
 		item_set_id_t id;
 
 		lr0_item_set(int set_id = -1) : id(set_id) {}
-		//lr0_item_set() { id = lr0_item_set_size++; }
 
 		bool operator==(const lr0_item_set& other) const {
 			std::set<std::pair<production_id_t, int>> core_items, other_core_items;
@@ -680,187 +681,24 @@ namespace gram {
 
 		std::shared_ptr<lr0_item_set> lr0_closure(const lr0_item_set& I) const;
 		std::shared_ptr<lr0_item_set> lr0_go_to(const lr0_item_set& I, const symbol_t& X) const;
-		//std::vector<std::shared_ptr<lr0_item_set>> build_lr0_states();
-
-		//std::tuple<
-		//	std::unordered_map<lalr1_item_t, symbol_t, lr0_item_hasher>, 
-		//	std::unordered_set<lalr1_item_t, lr0_item_hasher>
-		//> detemine_lookaheads(
-		//	const std::shared_ptr<gram::lr0_item_set>& I, const gram::symbol_t& X
-		//);
-
 		std::shared_ptr<lalr1_item_set> closure(const lalr1_item_set& I);
 		std::shared_ptr<lalr1_item_set> go_to(const lalr1_item_set& I, const symbol_t& X);
 
 		void comp_first_sets();
-		//void comp_follow_sets();
 		std::unordered_set<symbol_t, symbol_hasher> comp_first_of_sequence(
 			const std::vector<symbol_t>& sequence,
 			const std::unordered_set<symbol_t, symbol_hasher>& lookaheads = {}
 		);
 
-		lalr1_item_t* find_no_const_lalr1_item(const item_id_t target_id) {
-			for (auto& state : lalr1_states) {
-				auto item = state->find_no_const_item(target_id);
-				if (item != nullptr) {
-					return item;
-				}
-			}
-			return nullptr;
-		}
-
-		lalr1_item_t* find_no_const_lalr1_item(const lalr1_item_t& target) {
-			for (auto& state : lalr1_states) {
-				auto item = state->find_no_const_item(target);
-				if (item != nullptr) {
-					return item;
-				}
-			}
-			return nullptr;
-		}
-
 		void build_lr0_states();
 		void initialize_lalr1_states();
 
-		void determine_lookaheads(
+		void propagate_lookaheads(
 			const lalr1_item_t& i, const gram::symbol_t& X, item_set_id_t set_id,
-			std::unordered_map<item_id_t, std::pair<item_set_id_t, item_id_t>>& propagation_graph
-		)
-		{
-#ifdef __DEBUG__
+			std::unordered_map<item_id_t, std::vector<std::pair<item_set_id_t, item_id_t>>>& propagation_graph
+		);
 
-			std::cout << "Determining lookaheads for item: " << i.to_string() << " on symbol: " << X.name << " in state: " << set_id << std::endl;
-
-#endif
-
-
-			lalr1_item_set original_item_set;
-			original_item_set.add_items(i);
-			std::shared_ptr<lalr1_item_set> J = closure(original_item_set);
-
-			item_set_id_t target_item_set_id = goto_table[std::make_pair(set_id, X)];
-			for (const auto& item: lalr1_states[target_item_set_id]->get_items()) 
-				propagation_graph[i.id] = std::make_pair(target_item_set_id, item.id);
-
-
-#ifdef __DEBUG__
-			std::cout << "Closure B Items: \n" << J->to_string() << std::endl;
-#endif
-
-
-			for (auto& B : J->get_items()) {
-
-
-				if (!(B.dot_pos < B.product->right.size() && B.next_symbol() == X))
-					continue;
-
-				auto goto_B = go_to(*J, X);
-
-#ifdef __DEBUG__
-				std::cout << "Goto B Items: \n" << goto_B->to_string() << std::endl;
-#endif
-
-				for (auto& la : *B.lookaheads)
-				{
-					
-					for (const auto& goto_B_item : goto_B->get_items())
-					{
-
-#ifdef __DEBUG__
-						std::cout << "GOTO B item: " << goto_B_item.to_string() << std::endl;
-
-#endif
-						if (goto_B_item.product->id == B.product->id && goto_B_item.dot_pos == B.dot_pos + 1)
-						{
-
-							auto found = lalr1_states[target_item_set_id]->find_no_const_item(goto_B_item.id);
-							if (found != nullptr)
-							{
-#ifdef __DEBUG__
-								std::cout << "  Spontaneously generating lookahead " << la.name << " for item: " << found->to_string() << std::endl;
-#endif
-								found->add_lookahead(la);
-
-							}
-
-						}
-					}
-				}
-			}
-			
-		}
-
-		void build() {
-
-#ifdef __DEBUG__
-			std::cout << "\n\n=============== LALR(1) Build Starting... ===============\n\n" << std::endl;
-#endif
-
-			build_lr0_states();
-			initialize_lalr1_states();
-
-			std::unordered_map<item_id_t, std::pair<item_set_id_t, item_id_t>> propagation_graph;
-			
-#ifdef __DEBUG__
-			std::cout << "\n\n=============== LALR(1) Parsing Table Building... ===============\n\n" << std::endl;
-#endif
-			for (item_set_id_t i = 0; i < lalr1_states.size(); i++)
-			{
-				for (const lalr1_item_t& lalr_i : lalr1_states[i]->get_items())
-				{
-					for (const auto& X : terminals)
-						determine_lookaheads(lalr_i, X, i,
-							propagation_graph
-						);
-
-					for (const auto& X : non_terminals) 
-						determine_lookaheads(lalr_i, X, i,
-							propagation_graph
-						);
-				}
-
-
-			}
-
-#ifdef __DEBUG__
-			std::cout << "LALR(1) States Built. Total States: " << lalr1_states.size() << std::endl;
-			std::cout << lalr1_states_to_string() << std::endl;
-#endif
-			bool changed = true;
-
-			do
-			{
-
-				changed = false;
-				item_set_id_t i = 0;
-
-				// iterate all lalr1 items in all lalr1 states
-				for (; i < lalr1_states.size(); i++)
-				{
-
-#ifdef __DEBUG__
-					std::cout << lalr1_states[i]->to_string() << std::endl;
-#endif
-
-					for (const lalr1_item_t& lalr_i : lalr1_states[i]->get_items())
-					{
-						auto& [to_item_set_id, item_id] = propagation_graph[lalr_i.id];
-						auto found = lalr1_states[to_item_set_id]->find_no_const_item(item_id);
-						if (*found->lookaheads != *lalr_i.lookaheads) 
-							changed = found->add_lookaheads(*lalr_i.lookaheads);
-						
-					}
-				}
-
-
-			} while (changed);
-
-#ifdef __DEBUG__
-			std::cout << "LALR(1) States Built. Total States: " << lalr1_states.size() << std::endl;
-			std::cout << lalr1_states_to_string() << std::endl;
-#endif
-			
-		}
+		void build();
 
 		std::string lalr1_states_to_string() const {
 			std::string result;
@@ -899,11 +737,11 @@ namespace parse {
 		}
 	};
 
-	class lr_parser_table {
+	class lalr1_parser_table {
 	public:
 
 		std::unordered_map<std::pair<int, gram::symbol_t>, gram::action_t, pair_int_symbol_hasher> action_table;
-		std::unordered_map<std::pair<int, gram::symbol_t>, int, pair_int_symbol_hasher> goto_table;
+		std::unordered_map<std::pair<item_set_id_t, gram::symbol_t>, item_set_id_t, pair_int_symbol_hasher> goto_table;
 		//std::unordered_map < std::pair<int, grammar::symbol>, action,
 		//    [](const std::pair<int, grammar::symbol>& p) {
 		//    return std::hash<int>()(p.first) ^ std::hash<std::string>()(p.second.name);
@@ -914,8 +752,6 @@ namespace parse {
 		//    return std::hash<int>()(p.first) ^ std::hash<std::string>()(p.second.name);
 		//    } > goto_table;
 
-		void build_slr(const gram::grammar& grammar, const std::vector<gram::lr0_item_set>& states);
-		void build_lalr(gram::grammar& grammar, std::vector<gram::lr0_item_set>& states);
 	};
 
 	class lexer {
@@ -925,7 +761,6 @@ namespace parse {
 
 	public:
 		lexer() {
-			// 预定义词法规则
 			add_token_pattern("\\bint\\b", gram::symbol_t("int", gram::symbol_type_t::TERMINAL));
 			add_token_pattern("\\bfloat\\b", gram::symbol_t("float", gram::symbol_type_t::TERMINAL));
 			add_token_pattern("\\bchar\\b", gram::symbol_t("char", gram::symbol_type_t::TERMINAL));
@@ -970,12 +805,12 @@ namespace parse {
 
 	class lr_parser {
 	private:
-		lr_parser_table table;
+		lalr1_parser_table table;
 		gram::grammar grammar;
 		std::vector<std::string> error_msg;
 
 	public:
-		lr_parser(const gram::grammar& g, const lr_parser_table& t) : grammar(g), table(t) {}
+		lr_parser(const gram::grammar& g, const lalr1_parser_table& t) : grammar(g), table(t) {}
 
 		bool parse(const std::vector<std::pair<gram::symbol_t, std::string>>& tokens);
 		const std::vector<std::string>& get_error() const { return error_msg; }
@@ -1001,12 +836,12 @@ namespace parse {
 	public:
 		static void build(gram::grammar& grammar,
 			std::vector<gram::lr0_item_set>& states,
-			lr_parser_table& table,
+			lalr1_parser_table& table,
 			bool lalr = false
 		);
 	};
 }
 
-gram::grammar grammar_parser(const std::string& filename);
+std::unique_ptr<gram::grammar> grammar_parser(const std::string& filename);
 
 #endif  // __LR_PARSER_H__
