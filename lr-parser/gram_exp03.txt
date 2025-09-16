@@ -1,0 +1,11 @@
+Program -> StmtList
+StmtList -> Stmt StmtList | epsilon
+Stmt -> AssignStmt | IfStmt | WhileStmt | ExprStmt
+AssignStmt -> id = Expr ;
+IfStmt -> if ( Expr ) Stmt ElsePart
+ElsePart -> else Stmt | epsilon
+WhileStmt -> while ( Expr ) Stmt
+ExprStmt -> Expr ;
+Expr -> Expr + Term | Expr - Term | Term
+Term -> Term * Factor | Term / Factor | Factor
+Factor -> ( Expr ) | id | int_lit | float_lit | char_lit | bool_lit

@@ -928,13 +928,13 @@ void parse::grammar::build() {
 }
 
 
-parse::lr_parser::parse_result parse::lr_parser::parse(const std::vector<parse::symbol_t>& input_tokens)
+parse::lr_parser::parse_result parse::lr_parser::parse(const std::vector<std::pair<parse::symbol_t, std::string>>& input_tokens)
 {
 	parse_history.clear();
 
 	size_t index = 0;
-	std::vector<parse::symbol_t> tokens = input_tokens;
-	tokens.push_back(grammar->end_marker);
+	std::vector<std::pair<parse::symbol_t, std::string>> tokens = input_tokens;
+	tokens.push_back({ grammar->end_marker, "$" });
 
 #ifdef __LALR1_PARSER_HISTORY_INFO__
 	parse_history.push_back("Start parsing...");
@@ -944,7 +944,7 @@ parse::lr_parser::parse_result parse::lr_parser::parse(const std::vector<parse::
 	{
 		item_set_id_t current_state = state_stack.top();
 
-		parse::symbol_t current_token = tokens[index];
+		parse::symbol_t current_token = tokens[index].first;
 
 #ifdef __LALR1_PARSER_HISTORY_INFO__
 		std::string state_info = " State: " + std::to_string(current_state) + 
@@ -1042,4 +1042,58 @@ parse::lr_parser::parse_result parse::lr_parser::parse(const std::vector<parse::
 	
 
 	return parse_result();
+}
+
+std::vector<std::pair<parse::symbol_t, std::string>> parse::lexer::tokenize(const std::string& input)
+{
+	std::vector<std::pair<parse::symbol_t, std::string>> tokens;
+	size_t pos = 0;
+	line_number = 1;
+	column_number = 1;
+	errors.clear();
+
+	while (pos < input.size()) {
+		// 跳过空白字符和注释
+		skip_whitespace_and_comments(input, pos);
+		if (pos >= input.size()) break;
+
+		// 尝试匹配所有模式
+		bool matched = false;
+		size_t max_match_length = 0;
+		parse::symbol_t matched_symbol;
+		std::string matched_lexeme;
+
+		for (const auto& pattern : token_patterns) {
+			std::smatch match;
+			std::string remaining_input = input.substr(pos);
+
+			if (std::regex_search(remaining_input, match, pattern.first,
+				std::regex_constants::match_continuous)) {
+				if (match.length() > max_match_length) {
+					max_match_length = match.length();
+					matched_symbol = pattern.second;
+					matched_lexeme = match.str();
+					matched = true;
+				}
+			}
+		}
+
+		if (matched) {
+			tokens.emplace_back(matched_symbol, matched_lexeme);
+			pos += max_match_length;
+			column_number += max_match_length;
+		}
+		else {
+			// 无法识别的字符
+			std::string invalid_char(1, input[pos]);
+			add_error("Unrecognized character: '" + invalid_char + "'");
+			pos++;
+			column_number++;
+		}
+	}
+
+	// 添加结束标记
+	tokens.emplace_back(end_marker, "$");
+
+	return tokens;
 }

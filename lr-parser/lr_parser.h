@@ -925,8 +925,80 @@ namespace parse {
 
 	class lexer {
 	private:
+
 		std::vector<std::pair<std::regex, parse::symbol_t>> token_patterns;
 		parse::symbol_t end_marker{ "$", parse::symbol_type_t::TERMINAL };
+		std::vector<std::string> errors;
+		size_t line_number = 1;
+		size_t column_number = 1;
+
+		// Ìø¹ı¿Õ°××Ö·ûºÍ×¢ÊÍ
+		void skip_whitespace_and_comments(const std::string& input, size_t& pos) {
+			while (pos < input.size()) {
+				// Ìø¹ı¿Õ°××Ö·û
+				if (std::isspace(input[pos])) {
+					if (input[pos] == '\n') {
+						line_number++;
+						column_number = 1;
+					}
+					else {
+						column_number++;
+					}
+					pos++;
+					continue;
+				}
+
+				// ¼ì²éµ¥ĞĞ×¢ÊÍ
+				if (pos + 1 < input.size() && input[pos] == '/' && input[pos + 1] == '/') {
+					pos += 2;
+					column_number += 2;
+					while (pos < input.size() && input[pos] != '\n') {
+						pos++;
+						column_number++;
+					}
+					if (pos < input.size() && input[pos] == '\n') {
+						line_number++;
+						column_number = 1;
+						pos++;
+					}
+					continue;
+				}
+
+				// ¼ì²é¶àĞĞ×¢ÊÍ
+				if (pos + 1 < input.size() && input[pos] == '/' && input[pos + 1] == '*') {
+					pos += 2;
+					column_number += 2;
+					while (pos + 1 < input.size() && !(input[pos] == '*' && input[pos + 1] == '/')) {
+						if (input[pos] == '\n') {
+							line_number++;
+							column_number = 1;
+						}
+						else {
+							column_number++;
+						}
+						pos++;
+					}
+					if (pos + 1 >= input.size()) {
+						add_error("Unterminated multi-line comment");
+						return;
+					}
+					pos += 2;
+					column_number += 2;
+					continue;
+				}
+
+				// ²»ÊÇ¿Õ°×»ò×¢ÊÍ£¬ÍË³öÑ­»·
+				break;
+			}
+		}
+
+		void add_error(const std::string& message) {
+			std::string error_msg = "Line " + std::to_string(line_number) +
+				", Column " + std::to_string(column_number) +
+				": " + message;
+			errors.push_back(error_msg);
+			std::cerr << "Lexer Error: " << error_msg << std::endl;
+		}
 
 	public:
 		lexer() {
@@ -966,8 +1038,21 @@ namespace parse {
 		}
 
 		void add_token_pattern(const std::string& pattern, const parse::symbol_t& symbol) {
-			token_patterns.emplace_back(std::regex(pattern), symbol);
+			try {
+				token_patterns.emplace_back(std::regex(pattern), symbol);
+			}
+			catch (const std::regex_error& e) {
+				add_error("Invalid regex pattern: " + pattern + " - " + e.what());
+			}
 		}
+
+		//void print_token_patterns() const {
+		//	std::cout << "Token Patterns:\n";
+		//	for (const auto& pattern : token_patterns) {
+		//		std::cout << "  " << pattern.second.name << " : " << pattern.first.str() << "\n";
+		//	}
+		//}
+
 
 		std::vector<std::pair<parse::symbol_t, std::string>> tokenize(const std::string& input);
 	};
@@ -995,10 +1080,17 @@ namespace parse {
 			std::vector<std::string> parse_history;
 		};
 
-		parse_result parse(const std::vector<parse::symbol_t>& input_tokens);
+		parse_result parse(const std::vector<std::pair<parse::symbol_t, std::string>>& input_tokens);
 		const std::vector<std::string>& get_error() const { return error_msg; }
 		const std::vector<std::string>& get_parse_history() const {
 			return parse_history;
+		}
+		const std::string parse_history_to_string() const {
+			std::string result;
+			for (const auto& info : parse_history) {
+				result += info + "\n";
+			}
+			return result;
 		}
 
 	private:

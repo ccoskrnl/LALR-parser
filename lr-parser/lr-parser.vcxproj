@@ -128,12 +128,15 @@
     <ClCompile Include="lr_parser.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="compiler_frontend.h" />
     <ClInclude Include="framework.h" />
     <ClInclude Include="lr_parser.h" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="gram_exp01.txt" />
     <Text Include="gram_exp02.txt" />
+    <Text Include="gram_exp03.txt" />
+    <Text Include="gram_exp03_test.txt" />
   </ItemGroup>
   <ItemGroup>
     <Natvis Include="NatvisFile.natvis" />

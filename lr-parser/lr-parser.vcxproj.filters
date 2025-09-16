@@ -29,10 +29,15 @@
     <ClInclude Include="framework.h">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="compiler_frontend.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Text Include="gram_exp01.txt" />
     <Text Include="gram_exp02.txt" />
+    <Text Include="gram_exp03.txt" />
+    <Text Include="gram_exp03_test.txt" />
   </ItemGroup>
   <ItemGroup>
     <Natvis Include="NatvisFile.natvis">

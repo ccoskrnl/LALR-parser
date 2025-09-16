@@ -1,0 +1,15 @@
+x = 10;
+y = 3.14;
+z = 'A';
+flag = true;
+
+if (x > 5) {
+    result = x * y + 2;
+} else {
+    result = x / y - 1;
+}
+
+while (x > 0) {
+    x = x - 1;
+    y = y * 2;
+}
