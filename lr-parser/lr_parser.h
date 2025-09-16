@@ -211,12 +211,18 @@ namespace gram {
 
 		// No need for manual destructor
 
-		void add_lookaheads(const std::unordered_set<symbol_t, symbol_hasher>& las) {
+		bool add_lookaheads(const std::unordered_set<symbol_t, symbol_hasher>& las) {
+			if (las.empty())
+				return false;
+			const size_t old_size = lookaheads->size();
 			lookaheads->insert(las.begin(), las.end());
+			return old_size != lookaheads->size();
 		}
 
-		void add_lookahead(const symbol_t& la) {
+		bool add_lookahead(const symbol_t& la) {
+			const size_t old_size = lookaheads->size();
 			lookaheads->insert(la);
+			return old_size != lookaheads->size();
 		}
 
 		void del_lookahead(const symbol_t& la) {
@@ -420,6 +426,14 @@ namespace gram {
 					//return &const_cast<lalr1_item&>(item);
 					return &item;
 				}
+			}
+			return nullptr;
+		}
+
+		const lalr1_item_t* find_item(const item_id_t& id) const {
+			for (const auto& item : items) {
+				if (id == item.id)
+					return &item;
 			}
 			return nullptr;
 		}
@@ -707,19 +721,10 @@ namespace gram {
 
 		void build_lr0_states();
 		void initialize_lalr1_states();
-		void propagate_lookaheads();
-
-		//void determine_lookaheads(
-		//	const lalr1_item_t& i, const gram::symbol_t& X, item_set_id_t set_id,
-		//	std::unordered_map<lalr1_item_t, std::unordered_set<symbol_t, symbol_hasher>, lr0_item_hasher>& lookahead_map,
-		//	std::unordered_map<lalr1_item_t, std::pair<item_set_id_t, lalr1_item_t>, lr0_item_hasher> propagated_items
-		//)
 
 		void determine_lookaheads(
 			const lalr1_item_t& i, const gram::symbol_t& X, item_set_id_t set_id,
-			std::unordered_map<std::pair<item_id_t, symbol_t>, bool, pair_item_id_symbol_hasher>& spontaneous_generated,
-
-			std::unordered_map<item_id_t, std::unordered_set<item_id_t>>& propagation_graph
+			std::unordered_map<item_id_t, std::pair<item_set_id_t, item_id_t>>& propagation_graph
 		)
 		{
 #ifdef __DEBUG__
@@ -728,39 +733,23 @@ namespace gram {
 
 #endif
 
-			//std::unordered_map<std::pair<lalr1_item_t, symbol_t>, bool> spontaneous_generated;
-			//std::unordered_map<lalr1_item_t, std::unordered_set<lalr1_item_t, lr0_item_hasher>, lr0_item_hasher> propagation_graph;
 
 			lalr1_item_set original_item_set;
-			//lalr1_item_t lr0_with_lookaheads(i, {lookahead_sentinel});
-			lalr1_item_t i_with_lookahead_sentinel = i;
-
-			// i_with_lookaheads_sentinel is a copy of i with lookahead set to {lookahead_sentinel}, but
-			// they share the same lookahead set pointer, so modifying one will modify the other
-			i_with_lookahead_sentinel.add_lookahead(lookahead_sentinel);
-
-			original_item_set.add_items(i_with_lookahead_sentinel);
-
+			original_item_set.add_items(i);
 			std::shared_ptr<lalr1_item_set> J = closure(original_item_set);
+
+			item_set_id_t target_item_set_id = goto_table[std::make_pair(set_id, X)];
+			for (const auto& item: lalr1_states[target_item_set_id]->get_items()) 
+				propagation_graph[i.id] = std::make_pair(target_item_set_id, item.id);
+
 
 #ifdef __DEBUG__
 			std::cout << "Closure B Items: \n" << J->to_string() << std::endl;
-
 #endif
-			//std::shared_ptr<lalr1_item_set> goto_J = go_to(*J, X);
+
 
 			for (auto& B : J->get_items()) {
 
-				for (auto& la : *B.lookaheads)
-				{
-					if (la == lookahead_sentinel)
-					{ 
-						auto& no_const_B = const_cast<lalr1_item_t&>(B);
-						no_const_B.set_dot_pos(B.dot_pos + 1);
-						propagation_graph[i.id].insert(no_const_B.id);
-						no_const_B.set_dot_pos(B.dot_pos - 1);
-					}
-				}
 
 				if (!(B.dot_pos < B.product->right.size() && B.next_symbol() == X))
 					continue;
@@ -774,37 +763,30 @@ namespace gram {
 				for (auto& la : *B.lookaheads)
 				{
 					
-					if (la != lookahead_sentinel)
-						for (const auto& goto_B_item : goto_B->get_items())
+					for (const auto& goto_B_item : goto_B->get_items())
+					{
+
+#ifdef __DEBUG__
+						std::cout << "GOTO B item: " << goto_B_item.to_string() << std::endl;
+
+#endif
+						if (goto_B_item.product->id == B.product->id && goto_B_item.dot_pos == B.dot_pos + 1)
 						{
 
-#ifdef __DEBUG__
-							std::cout << "GOTO B item: " << goto_B_item.to_string() << std::endl;
-
-#endif
-							if (goto_B_item.product->id == B.product->id && goto_B_item.dot_pos == B.dot_pos + 1)
+							auto found = lalr1_states[target_item_set_id]->find_no_const_item(goto_B_item.id);
+							if (found != nullptr)
 							{
-
-								auto found = find_no_const_lalr1_item(goto_B_item.id);
-								if (found != nullptr)
-								{
 #ifdef __DEBUG__
-									std::cout << "  Spontaneously generating lookahead " << la.name << " for item: " << found->to_string() << std::endl;
+								std::cout << "  Spontaneously generating lookahead " << la.name << " for item: " << found->to_string() << std::endl;
 #endif
-									found->add_lookahead(la);
+								found->add_lookahead(la);
 
-								}
-
-								spontaneous_generated[std::make_pair(goto_B_item.id, la)] = true;
-								break;
 							}
+
 						}
+					}
 				}
 			}
-
-			// because i_with_lookahead_sentinel and i share the same lookahead set pointer,
-			// so we need to remove the lookahead_sentinel
-			i_with_lookahead_sentinel.del_lookahead(lookahead_sentinel);
 			
 		}
 
@@ -816,178 +798,67 @@ namespace gram {
 
 			build_lr0_states();
 			initialize_lalr1_states();
-			//propagate_lookaheads();
 
+			std::unordered_map<item_id_t, std::pair<item_set_id_t, item_id_t>> propagation_graph;
 			
 #ifdef __DEBUG__
 			std::cout << "\n\n=============== LALR(1) Parsing Table Building... ===============\n\n" << std::endl;
 #endif
-			std::unordered_map<std::pair<item_id_t, symbol_t>, bool, pair_item_id_symbol_hasher> spontaneous_generated;
-			std::unordered_map<item_id_t, std::unordered_set<item_id_t>> propagation_graph;
-
-			//std::unordered_map<std::pair<lalr1_item_t, symbol_t>, bool> spontaneous_generated;
-
-			//std::unordered_map<lalr1_item_t, std::unordered_set<symbol_t, symbol_hasher>, lr0_item_hasher> lookahead_map;
-			//std::unordered_map<lalr1_item_t, std::pair<item_set_id_t, lalr1_item_t>, lr0_item_hasher> propagated_items;
-
-			//std::cout << "LALR(1) States Built. Total States: " << lalr1_states.size() << std::endl;
-			//std::cout << lalr1_states_to_string() << std::endl;
-
 			for (item_set_id_t i = 0; i < lalr1_states.size(); i++)
 			{
 				for (const lalr1_item_t& lalr_i : lalr1_states[i]->get_items())
 				{
-					for (const auto& X : terminals) {
-						//determine_lookaheads(lalr_i, X, i, lookahead_map, propagated_items);
-						determine_lookaheads(lalr_i, X, i, spontaneous_generated, propagation_graph);
-					}
-				}
-#ifdef __DEBUG__
+					for (const auto& X : terminals)
+						determine_lookaheads(lalr_i, X, i,
+							propagation_graph
+						);
 
-				// print propagation_graph
-				for (const auto& [from_item_id, to_items_id] : propagation_graph)
-				{
-					auto found = find_no_const_lalr1_item(from_item_id);
-					if (found != nullptr)
-					{
-						std::cout << "From Item: " << found->to_string() << " -> \n";
-						for (const auto& to_item_id : to_items_id)
-						{
-							auto to_found = find_no_const_lalr1_item(to_item_id);
-							if (to_found != nullptr)
-							{
-								std::cout << "    " << to_found->to_string() << " ; \n\n";
-							}
-						}
-						std::cout << std::endl;
-					}
+					for (const auto& X : non_terminals) 
+						determine_lookaheads(lalr_i, X, i,
+							propagation_graph
+						);
 				}
+
 
 			}
 
+#ifdef __DEBUG__
 			std::cout << "LALR(1) States Built. Total States: " << lalr1_states.size() << std::endl;
 			std::cout << lalr1_states_to_string() << std::endl;
-
 #endif
 			bool changed = true;
-
-			// print propagation_graph
-			for (const auto& [from_item_id, to_items_id] : propagation_graph)
-			{
-				auto found = find_no_const_lalr1_item(from_item_id);
-				if (found != nullptr)
-				{
-					std::cout << "From Item: " << found->to_string() << " -> \n";
-					for (const auto& to_item_id : to_items_id)
-					{
-						auto to_found = find_no_const_lalr1_item(to_item_id);
-						if (to_found != nullptr)
-						{
-							std::cout << "    " << to_found->to_string() << " ; \n\n";
-						}
-					}
-					std::cout << std::endl;
-				}
-			}
 
 			do
 			{
 
 				changed = false;
+				item_set_id_t i = 0;
 
 				// iterate all lalr1 items in all lalr1 states
-				for (item_set_id_t i = 0; i < lalr1_states.size(); i++)
+				for (; i < lalr1_states.size(); i++)
 				{
 
 #ifdef __DEBUG__
 					std::cout << lalr1_states[i]->to_string() << std::endl;
 #endif
 
-					// for each lookahead in the lalr1 item
 					for (const lalr1_item_t& lalr_i : lalr1_states[i]->get_items())
 					{
-						for (const auto& la : *lalr_i.lookaheads)
-						{
-							//// if the lookahead is not lookahead_sentinel and it is not spontaneously generated
-							//if (la != lookahead_sentinel && spontaneous_generated.find(std::make_pair(lalr_i.id, la)) == spontaneous_generated.end())
-							//{
-								// propagate the lookahead to all items in the propagation graph
-								if (propagation_graph.find(lalr_i.id) != propagation_graph.end())
-								{
-									// for each item in the propagation graph
-									for (const auto& prop_item_id : propagation_graph[lalr_i.id])
-									{
-										// find the item in the lalr1 states and add the lookahead if not already present
-										auto found = find_no_const_lalr1_item(prop_item_id);
-										if (found != nullptr && found->lookaheads->find(la) == found->lookaheads->end())
-										{
-											found->add_lookahead(la);
-											changed = true;
-										}
-
-										//auto found = lalr1_states[i]->find_no_const_item(prop_item);
-										//if (found != nullptr && found->lookaheads->find(la) == found->lookaheads->end())
-										//{
-										//	found->add_lookahead(la);
-										//	changed = true;
-										//}
-									}
-								}
-							//}
-						}
+						auto& [to_item_set_id, item_id] = propagation_graph[lalr_i.id];
+						auto found = lalr1_states[to_item_set_id]->find_no_const_item(item_id);
+						if (*found->lookaheads != *lalr_i.lookaheads) 
+							changed = found->add_lookaheads(*lalr_i.lookaheads);
+						
 					}
 				}
-
-				//for (auto& lalr_i_set : lalr1_states) {
-
-				//	std::cout << lalr_i_set->to_string() << std::endl;
-
-				//	for (auto& lalr_i : lalr_i_set->get_items()) {
-
-				//		if (lookahead_map.find(lalr_i) != lookahead_map.end())
-				//		{
-				//			//changed = true;
-				//			for (const auto& la : lookahead_map[lalr_i])
-				//				lalr_i.lookaheads->insert(la);
-				//		}
-
-				//		//if (!lookahead_map[lalr_i].empty())
-				//		//{
-				//		//	const auto& las = lookahead_map[lalr_i];
-
-				//		//	for (const auto& la : las)
-				//		//	{
-				//		//		//const_cast<std::unordered_set<symbol_t, symbol_hasher>&>(lalr_i.lookaheads).insert(la);
-
-				//		//		lalr_i.lookaheads->insert(la);
-				//		//	}
-				//		//}
-
-				//		if (propagated_items.find(lalr_i) != propagated_items.end())
-				//		{
-				//			auto& prop_info = propagated_items[lalr_i];
-				//			auto found = lalr1_states[prop_info.first]->find_item(prop_info.second);
-				//			if (found != nullptr)
-				//			{
-				//				for (const auto& la : *found->lookaheads)
-				//				{
-				//					if (la != lookahead_sentinel && lalr_i.lookaheads->find(la) == lalr_i.lookaheads->end())
-				//					{
-				//						lalr_i.lookaheads->insert(la);
-				//						changed = true;
-				//					}
-				//				}
-				//			}
-
-				//		}
-				//	}
-				//}
 
 
 			} while (changed);
 
+#ifdef __DEBUG__
 			std::cout << "LALR(1) States Built. Total States: " << lalr1_states.size() << std::endl;
 			std::cout << lalr1_states_to_string() << std::endl;
+#endif
 			
 		}
 
@@ -1020,7 +891,6 @@ namespace gram {
 
 namespace parse {
 
-	// Îª std::pair<int, grammar::symbol> ¶¨Òå¹þÏ£Æ÷
 	struct pair_int_symbol_hasher {
 		size_t operator()(const std::pair<int, gram::symbol_t>& p) const {
 			size_t h1 = std::hash<int>()(p.first);
