@@ -13,6 +13,9 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
+    <Filter Include="examples">
+      <UniqueIdentifier>{855a1598-885c-46cf-9f1c-8e9ccab93ccd}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="demo.cpp">
@@ -34,14 +37,20 @@
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <Text Include="gram_exp01.txt" />
-    <Text Include="gram_exp02.txt" />
-    <Text Include="gram_exp03.txt" />
-    <Text Include="gram_exp03_test.txt" />
-  </ItemGroup>
-  <ItemGroup>
-    <Natvis Include="NatvisFile.natvis">
-      <Filter>资源文件</Filter>
-    </Natvis>
+    <Text Include="examples\gram_exp01.txt">
+      <Filter>examples</Filter>
+    </Text>
+    <Text Include="examples\gram_exp02.txt">
+      <Filter>examples</Filter>
+    </Text>
+    <Text Include="examples\gram_exp03.txt">
+      <Filter>examples</Filter>
+    </Text>
+    <Text Include="examples\gram_exp03_test.txt">
+      <Filter>examples</Filter>
+    </Text>
+    <Text Include="examples\gram_exp04.txt">
+      <Filter>examples</Filter>
+    </Text>
   </ItemGroup>
 </Project>

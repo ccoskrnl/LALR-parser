@@ -18,8 +18,45 @@ private:
 
 public:
 	compiler_frontend(const std::string& grammar_bnf) {
+
 		parser = std::make_unique<parse::lr_parser>(grammar_parser(grammar_bnf));
+#ifdef __DEBUG__
+		std::cout << "======== Grammar: \n" << *this->parser->grammar << std::endl;
+		std::cout << "======== Production: \n" << this->parser->grammar->productions_to_string() << std::endl;
+		std::cout << this->parser->grammar->action_table_to_string_detailed() << std::endl;
+		std::cout << this->parser->grammar->goto_table_to_string_detailed() << std::endl;
+#endif
+
 	}
+
+	bool compile(const std::string& code) {
+		
+
+
+		auto tokens = lex.tokenize(code);
+
+#ifdef __DEBUG__
+		for (const auto& p : tokens) {
+			std::cout << "Symbol: " << p.first.name << " , Lexeme: " << p.second << std::endl;
+		}
+#endif
+
+		auto parse_result = parser->parse(tokens);
+
+		std::cout << parser->parse_history_to_string() << std::endl;
+
+		if (!parse_result.success) {
+			std::cerr << "Syntax errors found:\n";
+			std::cerr << parse_result.error_message << "\n";
+			return false;
+		}
+
+		std::cout << "Compilation successful!\n";
+
+		return true;
+	}
+
+
 
 	bool compile(const std::string& code_file, bool is_file) {
 		
@@ -37,6 +74,12 @@ public:
 			std::istreambuf_iterator<char>());
 
 		auto tokens = lex.tokenize(content);
+
+#ifdef __DEBUG__
+		for (const auto& p : tokens) {
+			std::cout << "Symbol: " << p.first.name << " , Lexeme: " << p.second << std::endl;
+		}
+#endif
 
 		auto parse_result = parser->parse(tokens);
 

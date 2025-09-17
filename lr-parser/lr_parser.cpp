@@ -547,6 +547,9 @@ void parse::grammar::build_lr0_states()
 
 	// compute its closure
 	std::shared_ptr<lr0_item_set> closured_start_set = lr0_closure(start_set);
+
+	std::cout << closured_start_set->to_string() << std::endl;
+
 	lr0_states.push_back(closured_start_set);
 
 	for (size_t i = 0; i < lr0_states.size(); i++) {
@@ -578,16 +581,14 @@ void parse::grammar::build_lr0_states()
 
 					// assign a new ID
 					goto_set->id = static_cast<item_set_id_t>(lr0_states.size());
-
 					lr0_states.push_back(goto_set);
-					lr0_goto_cache_table[{ current_set->id, symbol }] = static_cast<item_set_id_t>(goto_set->id);
 				}
 			}
 		}
 
 	}
 
-#ifdef __DEBUG_OUTPUT__
+	//#ifdef __DEBUG_OUTPUT__
 
 	std::cout << "Total LR(0) states: " << lr0_states.size() << std::endl;
 	for (const auto& state : lr0_states) {
@@ -595,6 +596,8 @@ void parse::grammar::build_lr0_states()
 	}
 
 	std::cout << "GOTO transitions:" << std::endl;
+	//#endif
+
 	for (const auto& from_state : lr0_states) {
 		for (const auto& symbol : from_state->get_transition_symbols()) {
 			std::shared_ptr<lr0_item_set> to_state = lr0_go_to(*from_state, symbol);
@@ -602,9 +605,12 @@ void parse::grammar::build_lr0_states()
 				// find the state in lr0_states
 				for (const auto& s : lr0_states) {
 					if (*s == *to_state) {
+						lr0_goto_cache_table[{from_state->id, symbol}] = s->id;
+						//#ifdef __DEBUG_OUTPUT__
 						std::cout << "  From state " << from_state->id
 							<< " to state " << s->id
 							<< " on symbol '" << symbol.name << "'" << std::endl;
+						//#endif
 						break;
 					}
 				}
@@ -612,7 +618,6 @@ void parse::grammar::build_lr0_states()
 		}
 	}
 
-#endif
 
 	//// Remove non-kernel items from each state
 	//for (auto& state_ptr : lr0_states) {
@@ -690,7 +695,7 @@ void parse::grammar::propagate_lookaheads(
 
 
 #ifdef __DEBUG_OUTPUT__
-	std::cout << "Closure B Items: \n" << J->to_string() << std::endl;
+	std::cout << "Closure J Items: \n" << J->to_string() << std::endl;
 #endif
 
 
@@ -723,18 +728,13 @@ void parse::grammar::propagate_lookaheads(
 					if (found != nullptr)
 					{
 
-						/*
-							We can obtain all the spontaneous generated lookaheads in J through closure( { i } ).
-							So, we don't need to compute the first (δ) in [C→γX⋅δ,n]
-						*/
-
-						//std::vector<gram::symbol_t> beta_a;
-						//for (int i = B.dot_pos + 1; i < B.product->right.size(); i++) {
-						//	beta_a.push_back(B.product->right[i]);
-						//}
-						//std::unordered_set<gram::symbol_t, gram::symbol_hasher> lookaheads =
-						//	comp_first_of_sequence(beta_a, *B.lookaheads);
-						//lookaheads.insert(la);
+						std::vector<parse::symbol_t> beta_a;
+						for (int i = B.dot_pos + 1; i < B.product->right.size(); i++) {
+							beta_a.push_back(B.product->right[i]);
+						}
+						std::unordered_set<parse::symbol_t, parse::symbol_hasher> lookaheads =
+							comp_first_of_sequence(beta_a, *B.lookaheads);
+						lookaheads.insert(la);
 
 						//found->add_lookaheads(lookaheads);
 						found->add_lookahead(la);
@@ -831,10 +831,15 @@ void parse::grammar::build_action_table()
 	for (item_set_id_t i = 0; i < lalr1_states.size(); i++) {
 		auto& state = lalr1_states[i];
 		auto J = closure(*state);
+
+			//std::cout << J->to_string() << std::endl;
+
 		for (auto& item : J->get_items())
-		//for (auto& item : state->get_items())
+			//for (auto& item : state->get_items())
 		{
 			auto& prod = item.product;
+
+
 			if (item.dot_pos >= prod->right.size())
 			{
 				for (auto& la : *item.lookaheads) {
@@ -845,14 +850,14 @@ void parse::grammar::build_action_table()
 							std::cerr << "Shift-Reduce conflict at state " << i
 								<< " on symbol " << la.name
 								<< " between shift to " << existing_action.value
-								<< " and reduce by production " << get_production_by_id(prod->id) << std::endl;
+								<< " and reduce by production " << get_production_by_id(prod->id)->to_string() << std::endl;
 							throw std::runtime_error("Shift-Reduce conflict detected");
 						}
 						else if (existing_action.type == parser_action_type_t::REDUCE) {
 							std::cerr << "Reduce-Reduce conflict at state " << i
 								<< " on symbol " << la.name
 								<< " between production " << existing_action.value
-								<< " and production " << get_production_by_id(prod->id) << std::endl;
+								<< " and production " << get_production_by_id(prod->id)->to_string() << std::endl;
 							throw std::runtime_error("Reduce-Reduce conflict detected");
 						}
 
@@ -866,49 +871,67 @@ void parse::grammar::build_action_table()
 
 				}
 			}
+
 			// if there is a symbol after the dot (shift action)
 			else
 			{
 				const auto& next_symbol = prod->right[item.dot_pos];
 
 				// if there is a symbol follows closely behind the dot and the symbol is terminal.
-				if (next_symbol.type == symbol_type_t::TERMINAL && next_symbol != epsilon) {
+				if (next_symbol.type == symbol_type_t::TERMINAL) {
 
+					if (next_symbol != epsilon) {
 
-					auto goto_key = std::make_pair(i, next_symbol);
+						auto goto_key = std::make_pair(i, next_symbol);
 
-					if (lr0_goto_cache_table.find(goto_key) != lr0_goto_cache_table.end())
-					{
-						// I_j <- GOTO(I_i, a)
-						auto next_state = lr0_goto_cache_table[{i, next_symbol}];
+						if (lr0_goto_cache_table.find(goto_key) != lr0_goto_cache_table.end())
+						{
+							// I_j <- GOTO(I_i, a)
+							auto next_state = lr0_goto_cache_table[{i, next_symbol}];
 
-						// check whether the action already exists.
-						if (action_table[i].count(next_symbol)) {
-							auto& existing_action = action_table[i][next_symbol];
-							if (existing_action.type != parser_action_type_t::SHIFT || existing_action.value != next_state) {
-								std::cerr << "Shift-Shift conflict at state " << i
-									<< " on symbol " << next_symbol.name
-									<< " between shift to " << existing_action.value
-									<< " and shift to " << next_state << std::endl;
-								throw std::runtime_error("Shift-Shift conflict detected");
+							// check whether the action already exists.
+							if (action_table[i].count(next_symbol)) {
+								auto& existing_action = action_table[i][next_symbol];
+								if (existing_action.type == parser_action_type_t::REDUCE || (existing_action.type == parser_action_type_t::SHIFT && existing_action.value == next_state)) {
+									action_table[i][next_symbol] = { parser_action_type_t::SHIFT, static_cast<parser_action_value_t>(next_state) };
+								}
+								else { 
+									 
+									std::cerr << (existing_action.type != parser_action_type_t::SHIFT ? "Reduce" : "Shift")
+										<< " - Shift conflict at state " << i
+										<< " on symbol " << next_symbol.name
+										<< " between " + existing_action.to_string()
+										<< " and shift to " << next_state << std::endl;
+									throw std::runtime_error("Shift-Shift conflict detected");
+								}
+							}
+							else
+							{
+								action_table[i][next_symbol] = { parser_action_type_t::SHIFT, static_cast<parser_action_value_t>(next_state) };
 							}
 						}
-						else
+
+
+					}
+					else
+					{
+						for (const auto& la : *item.lookaheads)
 						{
-							action_table[i][next_symbol] = { parser_action_type_t::SHIFT, static_cast<parser_action_value_t>(next_state) };
+							action_table[i][la] = { parser_action_type_t::REDUCE, prod->id };
 						}
 					}
 
 				}
-
 			}
 
-			
-			for (auto& entry : lr0_goto_cache_table) {
-				if (entry.first.second.type == symbol_type_t::NON_TERMINAL) {
-					goto_table[entry.first] = entry.second;
-				}
-			}
+		}
+
+	}
+
+
+	for (auto& entry : lr0_goto_cache_table) {
+		if (entry.first.second.type == symbol_type_t::NON_TERMINAL) {
+			goto_table[entry.first] = entry.second;
 		}
 	}
 
@@ -919,7 +942,7 @@ void parse::grammar::build() {
 #ifdef __DEBUG_OUTPUT__
 	std::cout << "\n\n=============== LALR(1) Build Starting... ===============\n\n" << std::endl;
 #endif
-
+	comp_first_sets();
 	build_lr0_states();
 	initialize_lalr1_states();
 	set_lalr1_items_lookaheads();
@@ -931,7 +954,8 @@ void parse::grammar::build() {
 parse::lr_parser::parse_result parse::lr_parser::parse(const std::vector<std::pair<parse::symbol_t, std::string>>& input_tokens)
 {
 	parse_history.clear();
-
+	symbol_stack.push(parse::symbol_t{ "$", parse::symbol_type_t::TERMINAL });
+	
 	size_t index = 0;
 	std::vector<std::pair<parse::symbol_t, std::string>> tokens = input_tokens;
 	tokens.push_back({ grammar->end_marker, "$" });
@@ -947,15 +971,15 @@ parse::lr_parser::parse_result parse::lr_parser::parse(const std::vector<std::pa
 		parse::symbol_t current_token = tokens[index].first;
 
 #ifdef __LALR1_PARSER_HISTORY_INFO__
-		std::string state_info = " State: " + std::to_string(current_state) + 
-			", Input: " + current_token.name +
-			", State stack size: " + std::to_string(state_stack.size()) +
-			", Symbol stack size: " + std::to_string(symbol_stack.size());
+		std::string state_info = " State: " + std::to_string(current_state) +
+			" , Input: " + current_token.name +
+			" , State stack size: " + std::to_string(state_stack.size()) + " , Top state: " + std::to_string(state_stack.top()) +
+			" , Symbol stack size: " + std::to_string(symbol_stack.size()) + " , Top symbol: " + symbol_stack.top().name;
 
 		parse_history.push_back(state_info);
 #endif
 
-		
+
 		if (grammar->action_table[current_state].find(current_token) != grammar->action_table[current_state].end()) {
 
 			// If we found the corresponding action.
@@ -981,6 +1005,7 @@ parse::lr_parser::parse_result parse::lr_parser::parse(const std::vector<std::pa
 
 				// find the corresponding production.
 				auto prod = grammar->get_production_by_id(a.value);
+				bool is_epsilon = (prod->right.size() == 1 && prod->right[0] == grammar->epsilon) ? true : false;
 
 #ifdef __LALR1_PARSER_HISTORY_INFO__
 				parse_history.push_back("Reduce: " + prod->to_string());
@@ -989,6 +1014,12 @@ parse::lr_parser::parse_result parse::lr_parser::parse(const std::vector<std::pa
 					if (state_stack.empty() || symbol_stack.empty()) {
 						return { false, "fatal: symbol stack empty !", parse_history };
 					}
+
+#ifdef __LALR1_PARSER_HISTORY_INFO__
+				parse_history.push_back("Pop: State " + std::to_string(state_stack.top()));
+#endif
+					if (is_epsilon)
+						continue;
 					state_stack.pop();
 					symbol_stack.pop();
 				}
@@ -999,18 +1030,22 @@ parse::lr_parser::parse_result parse::lr_parser::parse(const std::vector<std::pa
 
 				item_set_id_t new_state = state_stack.top();
 				symbol_t non_terminal = prod->left;
-				auto goto_key = std::make_pair( new_state, non_terminal );
+				auto goto_key = std::make_pair(new_state, non_terminal);
 				if (grammar->goto_table.find(goto_key) != grammar->goto_table.end())
 				{
 					item_set_id_t next_state = grammar->goto_table[goto_key];
-					state_stack.push(next_state);
-					symbol_stack.push(non_terminal);
+
+					//if (!is_epsilon) {
+						state_stack.push(next_state);
+						symbol_stack.push(non_terminal);
+					//}
+
 #ifdef __LALR1_PARSER_HISTORY_INFO__
 					parse_history.push_back("Shift to state: " + std::to_string(next_state));
 #endif
 				}
 				else {
-					return { false, "[ " + std::to_string(new_state) + 
+					return { false, "[ " + std::to_string(new_state) +
 									" , " + non_terminal.name + " ] not found in GOTO table."
 						, parse_history };
 				}
@@ -1025,7 +1060,7 @@ parse::lr_parser::parse_result parse::lr_parser::parse(const std::vector<std::pa
 #endif
 				return { true, "", parse_history };
 			}
-						
+
 
 			case parser_action_type_t::ERROR: {
 				return { false, "Error action in ACTION table.", parse_history };
@@ -1035,11 +1070,24 @@ parse::lr_parser::parse_result parse::lr_parser::parse(const std::vector<std::pa
 		}
 		else
 		{
-			return { false, "ACTION(" + std::to_string(current_state) + 
-				", " + current_token.name + ") doesn't have corresponding entry.", parse_history };
+			std::string s_s;
+			for (int i = state_stack.size() - 1; i >= 0; i--) {
+				s_s += std::to_string(state_stack.top()) + "  ";
+				state_stack.pop();
+			}
+			parse_history.push_back("State Stack: " + s_s);
+			s_s.clear();
+			for (int i = symbol_stack.size() - 1; i >= 0; i--) {
+				s_s += symbol_stack.top().name + "  ";
+				symbol_stack.pop();
+			}
+			parse_history.push_back("Symbol Stack: " + s_s);
+
+			return { false, "ACTION(" + std::to_string(current_state) +
+				", " + current_token.name + ") doesn't have the corresponding entry.", parse_history };
 		}
 	}
-	
+
 
 	return parse_result();
 }

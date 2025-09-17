@@ -644,10 +644,22 @@ namespace parse {
 
 		void build();
 
-		std::string lalr1_states_to_string() const {
+		std::string productions_to_string() const {
+			std::string result;
+			for (const auto& sym : productions) {
+				result += "Symbol: " + sym.first.name + "\n";
+				for (const auto& prod : sym.second) {
+					result += "\t" + prod->to_string() + "\n";
+				}
+				
+			}
+			return result;
+		}
+
+		std::string lalr1_states_to_string() {
 			std::string result;
 			for (const std::shared_ptr<lalr1_item_set> state : lalr1_states) {
-				result += state->to_string() + "\n";
+				result += closure(*state)->to_string() + "\n";
 			}
 			return result;
 		}
@@ -846,8 +858,9 @@ namespace parse {
 
 				// 输出每个GOTO条目
 				for (const auto& entry : entries) {
-					ss << "  " << std::setw(10) << entry.first.name << " : "
-						<< entry.second << "\n";
+					if (entry.second != 0)
+						ss << "  " << std::setw(10) << entry.first.name << " : "
+							<< entry.second << "\n";
 				}
 
 				ss << "\n";
@@ -1058,8 +1071,9 @@ namespace parse {
 	};
 
 	class lr_parser {
+
+
 	private:
-		std::unique_ptr<parse::grammar> grammar;
 
 		std::stack<item_set_id_t> state_stack;
 		std::stack<parse::symbol_t> symbol_stack;
@@ -1069,8 +1083,12 @@ namespace parse {
 		std::vector<std::string> error_msg;
 
 	public:
+
+		std::unique_ptr<parse::grammar> grammar;
+
 		lr_parser(std::unique_ptr<parse::grammar> g) {
 			grammar = std::move(g);
+			grammar->build();
 			state_stack.push(0);
 		}
 

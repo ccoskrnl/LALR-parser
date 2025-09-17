@@ -1,0 +1,9 @@
+Program    -> StmtList
+StmtList   -> Stmt StmtList | ¦Å
+Stmt       -> AssignStmt
+AssignStmt -> id = Expr ;
+Expr       -> Term ExprTail
+ExprTail   -> + Term ExprTail | ¦Å
+Term       -> Factor TermTail
+TermTail   -> * Factor TermTail | ¦Å
+Factor     -> id | int_lit
