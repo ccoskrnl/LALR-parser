@@ -139,7 +139,7 @@ namespace parse {
 
 
 		std::string to_string() {
-			std::string result = left.name + " -> ";
+			std::string result = "[ID: " + std::to_string(id) + " ]  " + left.name + " -> ";
 			for (const auto& sym : right) {
 				result += sym.name + " ";
 			}
@@ -191,12 +191,19 @@ namespace parse {
 			return symbol_t{ "", symbol_type_t::TERMINAL };
 		}
 
+		symbol_t current_symbol() const {
+			if (dot_pos > 0)
+				return product->right[dot_pos - 1];
+			return symbol_t{ "", symbol_type_t::TERMINAL };
+		}
+
 		bool is_kernel_item() const {
 			return dot_pos > 0 || product->id == AUGMENTED_GRAMMAR_PROD_ID;
 		}
 
 		std::string to_string() const {
-			std::string result = product->left.name + " -> ";
+
+			std::string result = "[ID: " + std::to_string(product->id) + " ]  " + product->left.name + " -> ";
 			for (size_t i = 0; i < product->right.size(); i++) {
 				if (i == dot_pos) {
 					result += ". ";
@@ -220,6 +227,11 @@ namespace parse {
 
 		lalr1_item_t(const lr0_item_t& item)
 			: lr0_item_t(item.product, item.dot_pos), lookaheads(std::make_shared<std::unordered_set<symbol_t, symbol_hasher>>()) {
+		}
+		
+		lalr1_item_t(const lalr1_item_t& item)
+			: lr0_item_t(item.product, item.dot_pos), lookaheads(std::make_shared<std::unordered_set<symbol_t, symbol_hasher>>()) {
+			this->add_lookaheads(*item.lookaheads);
 		}
 
 		lalr1_item_t(std::shared_ptr<production_t> prod, int dot, const std::unordered_set<symbol_t, symbol_hasher>& lookahead)
@@ -260,7 +272,7 @@ namespace parse {
 		}
 
 		std::string to_string() const {
-			std::string result = product->left.name + " -> ";
+			std::string result = "[ID: " + std::to_string(product->id) + " ]  " + product->left.name + " -> ";
 			for (size_t i = 0; i < product->right.size(); i++) {
 				if (i == dot_pos) {
 					result += ". ";
@@ -468,7 +480,7 @@ namespace parse {
 			return nullptr;
 		}
 		
-		lalr1_item_t* find_no_const_item(const lr0_item_t& core){
+		lalr1_item_t* find_mutable_item(const lr0_item_t& core){
 			for (auto& item : items) {
 				if (item.product->id == core.product->id && item.dot_pos == core.dot_pos) {
 					return &const_cast<lalr1_item_t&>(item);
@@ -478,7 +490,7 @@ namespace parse {
 			return nullptr;
 		}
 
-		lalr1_item_t* find_no_const_item(const item_id_t id){
+		lalr1_item_t* find_mutable_item(const item_id_t id){
 			for (auto& item : items) {
 				if (id == item.id) {
 					return &const_cast<lalr1_item_t&>(item);
@@ -635,7 +647,15 @@ namespace parse {
 
 		void propagate_lookaheads(
 			const lalr1_item_t& i, const parse::symbol_t& X, item_set_id_t set_id,
-			std::unordered_map<item_id_t, std::vector<std::pair<item_set_id_t, item_id_t>>>& propagation_graph
+			std::unordered_map<item_id_t, std::vector<std::pair<item_set_id_t, item_id_t>>>& propagation_graph,
+			std::unordered_map<item_id_t, std::unordered_set<parse::symbol_t, parse::symbol_hasher>>& spontaneous_la
+		);
+
+		void determine_lookaheads(
+			const item_set_id_t I_id,
+			const symbol_t X,
+			std::unordered_map<std::pair<item_set_id_t, item_id_t>, std::vector<std::pair<item_set_id_t, item_id_t>>, pair_items_state_item_id_hasher>& propagation_graph,
+			std::unordered_map<std::pair<item_set_id_t, item_id_t>, std::unordered_set<parse::symbol_t, parse::symbol_hasher>, pair_items_state_item_id_hasher>& spontaneous_lookaheads
 		);
 
 		void set_lalr1_items_lookaheads();

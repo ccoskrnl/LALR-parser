@@ -6,8 +6,7 @@ int main()
 {
 
 	compiler_frontend frontend = compiler_frontend("examples/gram_exp03.txt");
-	//compiler_frontend frontend = compiler_frontend("gram_exp01.txt");
-	//frontend.compile("x = b + 10; y = y + 3;");
+	//frontend.compile("10 / 2 + 6 * 3 - 1");
 	//frontend.compile("**x = *y");
 	frontend.compile("examples/gram_exp03_test.txt", true);
 

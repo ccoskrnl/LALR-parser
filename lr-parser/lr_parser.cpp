@@ -677,7 +677,8 @@ void parse::grammar::initialize_lalr1_states() {
 */
 void parse::grammar::propagate_lookaheads(
 	const lalr1_item_t& i, const parse::symbol_t& X, item_set_id_t set_id,
-	std::unordered_map<item_id_t, std::vector<std::pair<item_set_id_t, item_id_t>>>& propagation_graph
+	std::unordered_map<item_id_t, std::vector<std::pair<item_set_id_t, item_id_t>>>& propagation_graph,
+	std::unordered_map<item_id_t, std::unordered_set<parse::symbol_t, parse::symbol_hasher>>& spontaneous_la
 )
 {
 #ifdef __DEBUG_OUTPUT__
@@ -690,8 +691,8 @@ void parse::grammar::propagate_lookaheads(
 	std::shared_ptr<lalr1_item_set> J = closure(original_item_set);
 
 	item_set_id_t target_item_set_id = lr0_goto_cache_table[std::make_pair(set_id, X)];
-	for (const auto& item : lalr1_states[target_item_set_id]->get_items())
-		propagation_graph[i.id].push_back(std::make_pair(target_item_set_id, item.id));
+	//for (const auto& item : lalr1_states[target_item_set_id]->get_items())
+	//	propagation_graph[i.id].push_back(std::make_pair(target_item_set_id, item.id));
 
 
 #ifdef __DEBUG_OUTPUT__
@@ -724,21 +725,33 @@ void parse::grammar::propagate_lookaheads(
 				if (goto_B_item.product->id == B.product->id && goto_B_item.dot_pos == B.dot_pos + 1)
 				{
 
-					auto found = lalr1_states[target_item_set_id]->find_no_const_item(goto_B_item.id);
+					auto found = lalr1_states[target_item_set_id]->find_mutable_item(goto_B_item.id);
 					if (found != nullptr)
 					{
 
+						// Compute spontaneous generated lookaheads.
 						std::vector<parse::symbol_t> beta_a;
 						for (int i = B.dot_pos + 1; i < B.product->right.size(); i++) {
 							beta_a.push_back(B.product->right[i]);
 						}
-						std::unordered_set<parse::symbol_t, parse::symbol_hasher> lookaheads =
-							comp_first_of_sequence(beta_a, *B.lookaheads);
-						lookaheads.insert(la);
+						std::unordered_set<parse::symbol_t, parse::symbol_hasher> first_beta =
+							comp_first_of_sequence(beta_a, { });
 
-						//found->add_lookaheads(lookaheads);
-						found->add_lookahead(la);
+						for (const auto& la : first_beta) {
+							if (la != epsilon) {
+								spontaneous_la[found->id].insert(la);
+							}
+						}
 
+						bool beta_nullable = first_beta.empty();
+						if (beta_nullable) {
+							for (const auto& la : *B.lookaheads) {
+								propagation_graph[B.id].push_back(std::make_pair(target_item_set_id, found->id));
+							}
+
+							found->add_lookahead(la);
+
+						}
 
 					}
 
@@ -749,80 +762,138 @@ void parse::grammar::propagate_lookaheads(
 
 }
 
+void parse::grammar::determine_lookaheads(
+	const item_set_id_t I_id,
+	const symbol_t X,
+	std::unordered_map<std::pair<item_set_id_t, item_id_t>, std::vector<std::pair<item_set_id_t, item_id_t>>, pair_items_state_item_id_hasher>& propagation_graph,
+	std::unordered_map<std::pair<item_set_id_t, item_id_t>, std::unordered_set<parse::symbol_t, parse::symbol_hasher>, pair_items_state_item_id_hasher>& spontaneous_lookaheads)
+{
+	std::shared_ptr<lalr1_item_set> I = lalr1_states[I_id];
+	for (const auto& kernel : I->get_items()) {
+
+		lalr1_item_t kernel_with_sentinel = lalr1_item_t(kernel);
+		kernel_with_sentinel.add_lookahead(lookahead_sentinel);
+		lalr1_item_set original_item_set;
+		original_item_set.add_items(kernel_with_sentinel);
+
+		std::shared_ptr<lalr1_item_set> J = closure(original_item_set);
+
+#ifdef __DEBUG_OUTPUT__
+		std::cout << "Closure J Items: \n" << J->to_string() << std::endl;
+#endif
+
+		for (const auto& B : J->get_items()) {
+
+			if (B.next_symbol() != X)
+				continue;
+
+#ifdef __DEBUG_OUTPUT__
+			std::cout << "Goto B Items: \n" << B.to_string() << std::endl;
+#endif
+
+			for (const auto& la : *B.lookaheads) {
+				if (la != lookahead_sentinel) {
+
+					auto closured_goto_B_set = go_to(*J, X);
+					auto target_item_id = lr0_goto_cache_table[{I_id, X}];
+
+					for (const auto& goto_B : closured_goto_B_set->get_items())
+						if (goto_B.id == B.id && goto_B.dot_pos == B.dot_pos + 1)
+							spontaneous_lookaheads[{target_item_id, goto_B.id}].insert(la);
+				}
+
+				if (la == lookahead_sentinel) {
+
+					auto closured_goto_B_set = go_to(*J, X);
+					auto target_item_id = lr0_goto_cache_table[{I_id, X}];
+
+					for (const auto& goto_B : closured_goto_B_set->get_items())
+						if (goto_B.id == B.id && goto_B.dot_pos == B.dot_pos + 1)
+							propagation_graph[{I_id, kernel.id}].push_back({ target_item_id, goto_B.id });
+
+				}
+			}
+		}
+
+	}
+}
+
+
 void parse::grammar::set_lalr1_items_lookaheads()
 {
 
-	std::unordered_map<item_id_t, std::vector<std::pair<item_set_id_t, item_id_t>>> propagation_graph;
+	std::unordered_map<std::pair<item_set_id_t, item_id_t>, std::vector<std::pair<item_set_id_t, item_id_t>>, pair_items_state_item_id_hasher> propagation_graph;
+	std::unordered_map<std::pair<item_set_id_t, item_id_t>, std::unordered_set<parse::symbol_t, parse::symbol_hasher>, pair_items_state_item_id_hasher> spontaneous_lookaheads;
 
 #ifdef __DEBUG_OUTPUT__
 	std::cout << "\n\n=============== LALR(1) Parsing Table Building... ===============\n\n" << std::endl;
 #endif
 	for (item_set_id_t i = 0; i < lalr1_states.size(); i++)
 	{
-		for (const lalr1_item_t& lalr_i : lalr1_states[i]->get_items())
-		{
-			for (const auto& X : terminals)
-				propagate_lookaheads(lalr_i, X, i,
-					propagation_graph
-				);
 
-			for (const auto& X : non_terminals)
-				propagate_lookaheads(lalr_i, X, i,
-					propagation_graph
-				);
-		}
+		for (const auto& X : terminals)
+			determine_lookaheads(i, X, propagation_graph, spontaneous_lookaheads);
 
+		for (const auto& X : non_terminals)
+			determine_lookaheads(i, X, propagation_graph, spontaneous_lookaheads);
 
 	}
 
-#ifdef __DEBUG_OUTPUT__
-	std::cout << "LALR(1) States Built. Total States: " << lalr1_states.size() << std::endl;
-	std::cout << lalr1_states_to_string() << std::endl;
-#endif
-	//	bool changed = true;
-	//
-	//	do
-	//	{
-	//
-	//		changed = false;
-	//		item_set_id_t i = 0;
-	//
-	//		// iterate all lalr1 items in all lalr1 states
-	//		for (; i < lalr1_states.size(); i++)
-	//		{
-	//
-	//#ifdef __DEBUG_OUTPUT__
-	//			std::cout << lalr1_states[i]->to_string() << std::endl;
-	//#endif
-	//
-	//			for (const lalr1_item_t& lalr_i : lalr1_states[i]->get_items())
-	//			{
-	//				for (auto& [to_item_set_id, item_id] : propagation_graph[lalr_i.id])
-	//				{ 
-	//					auto found = lalr1_states[to_item_set_id]->find_no_const_item(item_id);
-	//					if (*found->lookaheads != *lalr_i.lookaheads)
-	//						changed = found->add_lookaheads(*lalr_i.lookaheads);
-	//				}
-	//
-	//			}
-	//		}
-	//
-	//
-	//	} while (changed);
+	bool changed = true;
+
+	for (const auto& spon : spontaneous_lookaheads) {
+		auto [I_id, i_id] = spon.first;
+		auto item = lalr1_states[I_id]->find_mutable_item(i_id);
+		item->add_lookaheads(spon.second);
+	}
+
+
+
+	do
+	{
+
+		changed = false;
+		item_set_id_t I_id = 0;
+
+		for (; I_id < lalr1_states.size(); I_id++) {
+			for (const auto& kernel : lalr1_states[I_id]->get_items()) {
+
+				auto prop_it = propagation_graph.find({ I_id, kernel.id });
+				if (prop_it != propagation_graph.end()) {
+					for (const auto& target_pair : prop_it->second) {
+						item_set_id_t target_set_id = target_pair.first;
+						item_id_t target_item_id = target_pair.second;
+
+						auto target_item = lalr1_states[target_set_id]->find_mutable_item(target_item_id);
+						if (!target_item) continue;
+
+						std::unordered_set<parse::symbol_t, parse::symbol_hasher> to_add;
+						for (const auto& la : *kernel.lookaheads) {
+							if (target_item->lookaheads->find(la) == target_item->lookaheads->end()) {
+								to_add.insert(la);
+							}
+						}
+
+						if (!to_add.empty()) {
+							target_item->add_lookaheads(to_add);
+							changed = true;
+						}
+
+
+					}
+				}
+
+			}
+		}
+
+
+	} while (changed);
 
 #ifdef __DEBUG__
 	std::cout << "LALR(1) States Built. Total States: " << lalr1_states.size() << std::endl;
 	std::cout << lalr1_states_to_string() << std::endl;
 #endif
 
-
-	/* We don't store non-kernel items. */
-
-	//for (item_set_id_t i = 0; i < lalr1_states.size(); i++) {
-	//	auto& state = lalr1_states[i];
-	//	auto J = closure(*state);
-	//	state->add_items(*J);
-	//}
 
 }
 
@@ -832,7 +903,7 @@ void parse::grammar::build_action_table()
 		auto& state = lalr1_states[i];
 		auto J = closure(*state);
 
-			//std::cout << J->to_string() << std::endl;
+		//std::cout << J->to_string() << std::endl;
 
 		for (auto& item : J->get_items())
 			//for (auto& item : state->get_items())
@@ -892,11 +963,10 @@ void parse::grammar::build_action_table()
 							// check whether the action already exists.
 							if (action_table[i].count(next_symbol)) {
 								auto& existing_action = action_table[i][next_symbol];
-								if (existing_action.type == parser_action_type_t::REDUCE || (existing_action.type == parser_action_type_t::SHIFT && existing_action.value == next_state)) {
-									action_table[i][next_symbol] = { parser_action_type_t::SHIFT, static_cast<parser_action_value_t>(next_state) };
-								}
-								else { 
-									 
+								//	action_table[i][next_symbol] = { parser_action_type_t::SHIFT, static_cast<parser_action_value_t>(next_state) };
+
+								if (!(existing_action.type == parser_action_type_t::SHIFT && existing_action.value == next_state)) {
+
 									std::cerr << (existing_action.type != parser_action_type_t::SHIFT ? "Reduce" : "Shift")
 										<< " - Shift conflict at state " << i
 										<< " on symbol " << next_symbol.name
@@ -955,7 +1025,7 @@ parse::lr_parser::parse_result parse::lr_parser::parse(const std::vector<std::pa
 {
 	parse_history.clear();
 	symbol_stack.push(parse::symbol_t{ "$", parse::symbol_type_t::TERMINAL });
-	
+
 	size_t index = 0;
 	std::vector<std::pair<parse::symbol_t, std::string>> tokens = input_tokens;
 	tokens.push_back({ grammar->end_marker, "$" });
@@ -1016,7 +1086,7 @@ parse::lr_parser::parse_result parse::lr_parser::parse(const std::vector<std::pa
 					}
 
 #ifdef __LALR1_PARSER_HISTORY_INFO__
-				parse_history.push_back("Pop: State " + std::to_string(state_stack.top()));
+					parse_history.push_back("Pop: State " + std::to_string(state_stack.top()));
 #endif
 					if (is_epsilon)
 						continue;
@@ -1036,8 +1106,8 @@ parse::lr_parser::parse_result parse::lr_parser::parse(const std::vector<std::pa
 					item_set_id_t next_state = grammar->goto_table[goto_key];
 
 					//if (!is_epsilon) {
-						state_stack.push(next_state);
-						symbol_stack.push(non_terminal);
+					state_stack.push(next_state);
+					symbol_stack.push(non_terminal);
 					//}
 
 #ifdef __LALR1_PARSER_HISTORY_INFO__

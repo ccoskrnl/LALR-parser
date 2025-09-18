@@ -1,9 +1,8 @@
-Program    -> StmtList
-StmtList   -> Stmt StmtList | ¦Å
-Stmt       -> AssignStmt
-AssignStmt -> id = Expr ;
-Expr       -> Term ExprTail
-ExprTail   -> + Term ExprTail | ¦Å
-Term       -> Factor TermTail
-TermTail   -> * Factor TermTail | ¦Å
-Factor     -> id | int_lit
+E -> E + T
+E -> E - T
+E -> T
+T -> T * F
+T -> T / F
+T -> F
+F -> ( E )
+F -> int_lit
