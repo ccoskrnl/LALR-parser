@@ -84,7 +84,8 @@ namespace parse {
 
 	enum class symbol_type_t {
 		TERMINAL,
-		NON_TERMINAL
+		NON_TERMINAL,
+		EPSILON
 	};
 
 	struct symbol_t {

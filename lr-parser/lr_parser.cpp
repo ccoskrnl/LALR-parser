@@ -528,114 +528,191 @@ std::shared_ptr<parse::lr0_item_set> parse::grammar::lr0_go_to(const lr0_item_se
 
 void parse::grammar::build_lr0_states()
 {
-	//std::vector<std::shared_ptr<gram::lr0_item_set>> lr0_states;
-
 	// Create the augmented grammar
 	std::shared_ptr<parse::production_t> augmented_prod = std::make_shared<parse::production_t>(
 		parse::symbol_t(start_symbol.name + "'", parse::symbol_type_t::NON_TERMINAL),
 		std::vector<parse::symbol_t>{ start_symbol }
 	);
-
-	// set the start symbol to the new augmented start symbol
 	augmented_prod->id = AUGMENTED_GRAMMAR_PROD_ID;
 	productions.insert({ augmented_prod->left, { augmented_prod } });
 
-	// initialize the first item set with the augmented production
+	// Initialize the first item set with the augmented production (using lr0_item_t)
 	lr0_item_set start_set;
 	start_set.id = 0;
-	start_set.items.insert(parse::lalr1_item_t(augmented_prod, 0, { end_marker }));
+	start_set.items.insert(parse::lr0_item_t(augmented_prod, 0)); // Correct item type
 
-	// compute its closure
+	// Compute closure for the start set
 	std::shared_ptr<lr0_item_set> closured_start_set = lr0_closure(start_set);
-
-	std::cout << closured_start_set->to_string() << std::endl;
-
 	lr0_states.push_back(closured_start_set);
 
+	// Use an index-based loop to process all states
 	for (size_t i = 0; i < lr0_states.size(); i++) {
 		std::shared_ptr<parse::lr0_item_set> current_set = lr0_states[i];
 
-		// collect all symbols that can be transitioned on
+		// Collect all symbols that can be transitioned on from current state
 		std::unordered_set<parse::symbol_t, parse::symbol_hasher> transition_symbols;
-
 		for (const auto& item : current_set->get_items()) {
 			parse::symbol_t next_sym = item.next_symbol();
-			if (!next_sym.name.empty()) {
+			if (!next_sym.name.empty()) { // Skip empty symbols (e.g., epsilon)
 				transition_symbols.insert(next_sym);
 			}
 		}
 
-		// for each symbol, compute the GOTO set
+		// For each symbol, compute GOTO and add new states
 		for (const auto& symbol : transition_symbols) {
 			std::shared_ptr<lr0_item_set> goto_set = lr0_go_to(*current_set, symbol);
-			if (goto_set != nullptr && !goto_set->get_items().empty()) {
-				// check if this set already exists
-				bool exists = false;
-				for (const auto& I : lr0_states) {
-					if (*I == *goto_set) {
-						exists = true;
-						break;
-					}
-				}
-				if (!exists) {
+			if (goto_set == nullptr || goto_set->get_items().empty()) {
+				continue; // Skip empty GOTO sets
+			}
 
-					// assign a new ID
-					goto_set->id = static_cast<item_set_id_t>(lr0_states.size());
-					lr0_states.push_back(goto_set);
+			// Check if the GOTO set already exists in lr0_states
+			bool exists = false;
+			item_set_id_t existing_id = 0;
+			for (const auto& state : lr0_states) {
+				if (*state == *goto_set) {
+					exists = true;
+					existing_id = state->id;
+					break;
 				}
 			}
-		}
 
+			if (!exists) {
+				// Add new state
+				goto_set->id = lr0_states.size();
+				lr0_states.push_back(goto_set);
+				existing_id = goto_set->id;
+			}
+
+			// Record the GOTO transition in the cache table
+			lr0_goto_cache_table[{current_set->id, symbol}] = existing_id;
+		}
 	}
 
-	//#ifdef __DEBUG_OUTPUT__
-
+	// Debug output: print states and GOTO table
+//#ifdef __DEBUG_OUTPUT__
 	std::cout << "Total LR(0) states: " << lr0_states.size() << std::endl;
 	for (const auto& state : lr0_states) {
 		std::cout << *state << std::endl;
 	}
 
 	std::cout << "GOTO transitions:" << std::endl;
-	//#endif
-
-	for (const auto& from_state : lr0_states) {
-		for (const auto& symbol : from_state->get_transition_symbols()) {
-			std::shared_ptr<lr0_item_set> to_state = lr0_go_to(*from_state, symbol);
-			if (to_state != nullptr) {
-				// find the state in lr0_states
-				for (const auto& s : lr0_states) {
-					if (*s == *to_state) {
-						lr0_goto_cache_table[{from_state->id, symbol}] = s->id;
-						//#ifdef __DEBUG_OUTPUT__
-						std::cout << "  From state " << from_state->id
-							<< " to state " << s->id
-							<< " on symbol '" << symbol.name << "'" << std::endl;
-						//#endif
-						break;
-					}
-				}
-			}
-		}
+	for (const auto& entry : lr0_goto_cache_table) {
+		std::cout << "  From state " << entry.first.first
+			<< " to state " << entry.second
+			<< " on symbol '" << entry.first.second.name << "'" << std::endl;
 	}
-
-
-	//// Remove non-kernel items from each state
-	//for (auto& state_ptr : lr0_states) {
-	//	auto& items = state_ptr->get_items();
-
-	//	// Use erase-remove idiom to remove non-kernel items
-	//	items.erase(
-	//		std::remove_if(items.begin(), items.end(),
-	//			[](const lr0_item& item) {
-	//				// Keep only kernel items
-	//				return !item.is_kernel_item(); 
-	//			}),
-	//		items.end()
-	//	);
-	//}
-
-	//return lr0_states;
+//#endif
 }
+//void parse::grammar::build_lr0_states()
+//{
+//	//std::vector<std::shared_ptr<gram::lr0_item_set>> lr0_states;
+//
+//	// Create the augmented grammar
+//	std::shared_ptr<parse::production_t> augmented_prod = std::make_shared<parse::production_t>(
+//		parse::symbol_t(start_symbol.name + "'", parse::symbol_type_t::NON_TERMINAL),
+//		std::vector<parse::symbol_t>{ start_symbol }
+//	);
+//
+//	// set the start symbol to the new augmented start symbol
+//	augmented_prod->id = AUGMENTED_GRAMMAR_PROD_ID;
+//	productions.insert({ augmented_prod->left, { augmented_prod } });
+//
+//	// initialize the first item set with the augmented production
+//	lr0_item_set start_set;
+//	start_set.id = 0;
+//	start_set.items.insert(parse::lalr1_item_t(augmented_prod, 0, { end_marker }));
+//
+//	// compute its closure
+//	std::shared_ptr<lr0_item_set> closured_start_set = lr0_closure(start_set);
+//
+//	std::cout << closured_start_set->to_string() << std::endl;
+//
+//	lr0_states.push_back(closured_start_set);
+//
+//	for (size_t i = 0; i < lr0_states.size(); i++) {
+//		std::shared_ptr<parse::lr0_item_set> current_set = lr0_states[i];
+//
+//		// collect all symbols that can be transitioned on
+//		std::unordered_set<parse::symbol_t, parse::symbol_hasher> transition_symbols;
+//
+//		for (const auto& item : current_set->get_items()) {
+//			parse::symbol_t next_sym = item.next_symbol();
+//			if (!next_sym.name.empty()) {
+//				transition_symbols.insert(next_sym);
+//			}
+//		}
+//
+//		// for each symbol, compute the GOTO set
+//		for (const auto& symbol : transition_symbols) {
+//			std::shared_ptr<lr0_item_set> goto_set = lr0_go_to(*current_set, symbol);
+//			if (goto_set != nullptr && !goto_set->get_items().empty()) {
+//				// check if this set already exists
+//				bool exists = false;
+//				for (const auto& I : lr0_states) {
+//					if (*I == *goto_set) {
+//						exists = true;
+//						break;
+//					}
+//				}
+//				if (!exists) {
+//
+//					// assign a new ID
+//					goto_set->id = static_cast<item_set_id_t>(lr0_states.size());
+//					lr0_states.push_back(goto_set);
+//				}
+//			}
+//		}
+//
+//	}
+//
+//	//#ifdef __DEBUG_OUTPUT__
+//
+//	std::cout << "Total LR(0) states: " << lr0_states.size() << std::endl;
+//	for (const auto& state : lr0_states) {
+//		std::cout << *state << std::endl;
+//	}
+//
+//	std::cout << "GOTO transitions:" << std::endl;
+//	//#endif
+//
+//	for (const auto& from_state : lr0_states) {
+//		for (const auto& symbol : from_state->get_transition_symbols()) {
+//			std::shared_ptr<lr0_item_set> to_state = lr0_go_to(*from_state, symbol);
+//			if (to_state != nullptr) {
+//				// find the state in lr0_states
+//				for (const auto& s : lr0_states) {
+//					if (*s == *to_state) {
+//						lr0_goto_cache_table[{from_state->id, symbol}] = s->id;
+//						//#ifdef __DEBUG_OUTPUT__
+//						std::cout << "  From state " << from_state->id
+//							<< " to state " << s->id
+//							<< " on symbol '" << symbol.name << "'" << std::endl;
+//						//#endif
+//						break;
+//					}
+//				}
+//			}
+//		}
+//	}
+//
+//
+//	//// Remove non-kernel items from each state
+//	//for (auto& state_ptr : lr0_states) {
+//	//	auto& items = state_ptr->get_items();
+//
+//	//	// Use erase-remove idiom to remove non-kernel items
+//	//	items.erase(
+//	//		std::remove_if(items.begin(), items.end(),
+//	//			[](const lr0_item& item) {
+//	//				// Keep only kernel items
+//	//				return !item.is_kernel_item(); 
+//	//			}),
+//	//		items.end()
+//	//	);
+//	//}
+//
+//	//return lr0_states;
+//}
 
 /*
 	We initialize the LALR(1) states based on the LR(0) states.
@@ -768,6 +845,7 @@ void parse::grammar::determine_lookaheads(
 	std::unordered_map<std::pair<item_set_id_t, item_id_t>, std::vector<std::pair<item_set_id_t, item_id_t>>, pair_items_state_item_id_hasher>& propagation_graph,
 	std::unordered_map<std::pair<item_set_id_t, item_id_t>, std::unordered_set<parse::symbol_t, parse::symbol_hasher>, pair_items_state_item_id_hasher>& spontaneous_lookaheads)
 {
+
 	std::shared_ptr<lalr1_item_set> I = lalr1_states[I_id];
 	for (const auto& kernel : I->get_items()) {
 
@@ -798,8 +876,11 @@ void parse::grammar::determine_lookaheads(
 					auto target_item_id = lr0_goto_cache_table[{I_id, X}];
 
 					for (const auto& goto_B : closured_goto_B_set->get_items())
-						if (goto_B.id == B.id && goto_B.dot_pos == B.dot_pos + 1)
+					{
+						if (goto_B.product->id == B.product->id && goto_B.dot_pos == B.dot_pos + 1)
 							spontaneous_lookaheads[{target_item_id, goto_B.id}].insert(la);
+					}
+
 				}
 
 				if (la == lookahead_sentinel) {
@@ -963,7 +1044,10 @@ void parse::grammar::build_action_table()
 							// check whether the action already exists.
 							if (action_table[i].count(next_symbol)) {
 								auto& existing_action = action_table[i][next_symbol];
-								//	action_table[i][next_symbol] = { parser_action_type_t::SHIFT, static_cast<parser_action_value_t>(next_state) };
+
+								if (existing_action.type == parser_action_type_t::REDUCE) {
+									action_table[i][next_symbol] = { parser_action_type_t::SHIFT, static_cast<parser_action_value_t>(next_state) };
+								} else
 
 								if (!(existing_action.type == parser_action_type_t::SHIFT && existing_action.value == next_state)) {
 
@@ -1000,9 +1084,9 @@ void parse::grammar::build_action_table()
 
 
 	for (auto& entry : lr0_goto_cache_table) {
-		if (entry.first.second.type == symbol_type_t::NON_TERMINAL) {
+		//if (entry.first.second.type == symbol_type_t::NON_TERMINAL) {
 			goto_table[entry.first] = entry.second;
-		}
+		//}
 	}
 
 }

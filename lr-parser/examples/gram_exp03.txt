@@ -1,20 +1,14 @@
 Program    -> StmtList
 StmtList   -> Stmt StmtList | ¦Å
-Stmt       -> AssignStmt | IfStmt | WhileStmt | ExprStmt | Block
+Stmt       -> AssignStmt | ExprStmt
 AssignStmt -> id = Expr ;
-IfStmt     -> if ( Expr ) Stmt ElsePart
-ElsePart   -> else Stmt | ¦Å
-WhileStmt  -> while ( Expr ) Stmt
 ExprStmt   -> Expr ;
-Block      -> { StmtList }
 
-Expr       -> Expr LogOp Expr | RelExpr
-RelExpr    -> AddExpr RelOp AddExpr | AddExpr
-AddExpr    -> AddExpr AddOp Term | Term
-Term       -> Term MulOp Factor | Factor
-Factor     -> ( Expr ) | id | int_lit | float_lit | char_lit | bool_lit
+Expr       -> Term Expr'
+Expr'      -> AddOp Term Expr' | ¦Å
+Term       -> Factor Term'
+Term'      -> MulOp Factor Term' | ¦Å
+Factor     -> id | int_lit | float_lit | ( Expr )
 
-LogOp      -> &&
-RelOp      -> == | != | < | > | <= | >=
 AddOp      -> + | -
 MulOp      -> * | /
