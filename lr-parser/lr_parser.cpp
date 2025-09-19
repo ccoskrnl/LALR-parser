@@ -356,7 +356,7 @@ std::shared_ptr<parse::lalr1_item_set> parse::grammar::closure(const parse::lalr
 		return std::make_shared<lalr1_item_set>();
 
 	std::shared_ptr<lalr1_item_set> new_I = std::make_shared<lalr1_item_set>(I);
-	std::unordered_map<lalr1_item_t, bool, lr0_item_hasher> item_handled;
+	std::unordered_map<lalr1_item_t, bool, lalr1_item_hasher> item_handled;
 
 	bool changed = true;
 
@@ -365,7 +365,7 @@ std::shared_ptr<parse::lalr1_item_set> parse::grammar::closure(const parse::lalr
 		changed = false;
 
 		// Copy current items to avoid modification during iteration
-		std::unordered_set<lalr1_item_t, lr0_item_hasher>& current_items = new_I->get_items();
+		std::unordered_set<lalr1_item_t, lalr1_item_hasher> current_items = new_I->get_items();
 
 		for (const parse::lalr1_item_t& item : current_items) {
 
@@ -409,16 +409,15 @@ std::shared_ptr<parse::lalr1_item_set> parse::grammar::closure(const parse::lalr
 
 					if (existing_item != nullptr) {
 						// Item with same core exists, merge lookaheads
-						//size_t before_size = existing_item_iter->lookaheads.size();
+
 						size_t before_size = existing_item->lookaheads->size();
 
-						//gram::lalr1_item merged_item = *existing_item_iter; // Copy existing item
 						parse::lalr1_item_t merged_item = *existing_item; // Copy existing item
-
-
-						//new_I->items.erase(*existing_item); // Remove old item
 						merged_item.add_lookaheads(lookaheads);
-						//new_I->items.insert(merged_item); // Reinsert modified item
+
+						new_I->del_items(*existing_item);
+						new_I->add_items(merged_item);
+
 						if (merged_item.lookaheads->size() > before_size) {
 							changed = true;
 						}
@@ -437,8 +436,8 @@ std::shared_ptr<parse::lalr1_item_set> parse::grammar::closure(const parse::lalr
 	} while (changed);
 
 #ifdef __DEBUG_OUTPUT__
-	//std::cout << "LALR(1) Closure of start state:" << std::endl;
-	//std::cout << *new_I << std::endl;
+	std::cout << "LALR(1) Closure of start state:" << std::endl;
+	std::cout << *new_I << std::endl;
 #endif
 	return new_I;
 }
@@ -510,20 +509,17 @@ std::shared_ptr<parse::lr0_item_set> parse::grammar::lr0_closure(const lr0_item_
 std::shared_ptr<parse::lr0_item_set> parse::grammar::lr0_go_to(const lr0_item_set& I, const symbol_t& X) const
 {
 
-	auto result = std::make_shared<lr0_item_set>();
+	lr0_item_set result = lr0_item_set();
 
+	// for each [A -> α . Y β] in I
 	for (const auto& item : I.get_items()) {
 		if (item.next_symbol() == X) {
 			parse::lr0_item_t moved_item(item.product, item.dot_pos + 1);
-			result->add_items(moved_item);
+			result.add_items(moved_item);
 		}
 	}
 
-	if (result->get_items().empty()) {
-		return nullptr;
-	}
-
-	return lr0_closure(*result);
+	return lr0_closure(result);
 }
 
 void parse::grammar::build_lr0_states()
@@ -553,7 +549,8 @@ void parse::grammar::build_lr0_states()
 		std::unordered_set<parse::symbol_t, parse::symbol_hasher> transition_symbols;
 		for (const auto& item : current_set->get_items()) {
 			parse::symbol_t next_sym = item.next_symbol();
-			if (!next_sym.name.empty()) { // Skip empty symbols (e.g., epsilon)
+
+			if (!next_sym.name.empty()) { 
 				transition_symbols.insert(next_sym);
 			}
 		}
@@ -603,116 +600,6 @@ void parse::grammar::build_lr0_states()
 	}
 //#endif
 }
-//void parse::grammar::build_lr0_states()
-//{
-//	//std::vector<std::shared_ptr<gram::lr0_item_set>> lr0_states;
-//
-//	// Create the augmented grammar
-//	std::shared_ptr<parse::production_t> augmented_prod = std::make_shared<parse::production_t>(
-//		parse::symbol_t(start_symbol.name + "'", parse::symbol_type_t::NON_TERMINAL),
-//		std::vector<parse::symbol_t>{ start_symbol }
-//	);
-//
-//	// set the start symbol to the new augmented start symbol
-//	augmented_prod->id = AUGMENTED_GRAMMAR_PROD_ID;
-//	productions.insert({ augmented_prod->left, { augmented_prod } });
-//
-//	// initialize the first item set with the augmented production
-//	lr0_item_set start_set;
-//	start_set.id = 0;
-//	start_set.items.insert(parse::lalr1_item_t(augmented_prod, 0, { end_marker }));
-//
-//	// compute its closure
-//	std::shared_ptr<lr0_item_set> closured_start_set = lr0_closure(start_set);
-//
-//	std::cout << closured_start_set->to_string() << std::endl;
-//
-//	lr0_states.push_back(closured_start_set);
-//
-//	for (size_t i = 0; i < lr0_states.size(); i++) {
-//		std::shared_ptr<parse::lr0_item_set> current_set = lr0_states[i];
-//
-//		// collect all symbols that can be transitioned on
-//		std::unordered_set<parse::symbol_t, parse::symbol_hasher> transition_symbols;
-//
-//		for (const auto& item : current_set->get_items()) {
-//			parse::symbol_t next_sym = item.next_symbol();
-//			if (!next_sym.name.empty()) {
-//				transition_symbols.insert(next_sym);
-//			}
-//		}
-//
-//		// for each symbol, compute the GOTO set
-//		for (const auto& symbol : transition_symbols) {
-//			std::shared_ptr<lr0_item_set> goto_set = lr0_go_to(*current_set, symbol);
-//			if (goto_set != nullptr && !goto_set->get_items().empty()) {
-//				// check if this set already exists
-//				bool exists = false;
-//				for (const auto& I : lr0_states) {
-//					if (*I == *goto_set) {
-//						exists = true;
-//						break;
-//					}
-//				}
-//				if (!exists) {
-//
-//					// assign a new ID
-//					goto_set->id = static_cast<item_set_id_t>(lr0_states.size());
-//					lr0_states.push_back(goto_set);
-//				}
-//			}
-//		}
-//
-//	}
-//
-//	//#ifdef __DEBUG_OUTPUT__
-//
-//	std::cout << "Total LR(0) states: " << lr0_states.size() << std::endl;
-//	for (const auto& state : lr0_states) {
-//		std::cout << *state << std::endl;
-//	}
-//
-//	std::cout << "GOTO transitions:" << std::endl;
-//	//#endif
-//
-//	for (const auto& from_state : lr0_states) {
-//		for (const auto& symbol : from_state->get_transition_symbols()) {
-//			std::shared_ptr<lr0_item_set> to_state = lr0_go_to(*from_state, symbol);
-//			if (to_state != nullptr) {
-//				// find the state in lr0_states
-//				for (const auto& s : lr0_states) {
-//					if (*s == *to_state) {
-//						lr0_goto_cache_table[{from_state->id, symbol}] = s->id;
-//						//#ifdef __DEBUG_OUTPUT__
-//						std::cout << "  From state " << from_state->id
-//							<< " to state " << s->id
-//							<< " on symbol '" << symbol.name << "'" << std::endl;
-//						//#endif
-//						break;
-//					}
-//				}
-//			}
-//		}
-//	}
-//
-//
-//	//// Remove non-kernel items from each state
-//	//for (auto& state_ptr : lr0_states) {
-//	//	auto& items = state_ptr->get_items();
-//
-//	//	// Use erase-remove idiom to remove non-kernel items
-//	//	items.erase(
-//	//		std::remove_if(items.begin(), items.end(),
-//	//			[](const lr0_item& item) {
-//	//				// Keep only kernel items
-//	//				return !item.is_kernel_item(); 
-//	//			}),
-//	//		items.end()
-//	//	);
-//	//}
-//
-//	//return lr0_states;
-//}
 
 /*
 	We initialize the LALR(1) states based on the LR(0) states.
@@ -768,8 +655,6 @@ void parse::grammar::propagate_lookaheads(
 	std::shared_ptr<lalr1_item_set> J = closure(original_item_set);
 
 	item_set_id_t target_item_set_id = lr0_goto_cache_table[std::make_pair(set_id, X)];
-	//for (const auto& item : lalr1_states[target_item_set_id]->get_items())
-	//	propagation_graph[i.id].push_back(std::make_pair(target_item_set_id, item.id));
 
 
 #ifdef __DEBUG_OUTPUT__
@@ -846,6 +731,10 @@ void parse::grammar::determine_lookaheads(
 	std::unordered_map<std::pair<item_set_id_t, item_id_t>, std::unordered_set<parse::symbol_t, parse::symbol_hasher>, pair_items_state_item_id_hasher>& spontaneous_lookaheads)
 {
 
+	if (I_id == 3) {
+		int breakpoint = 0;
+	}
+
 	std::shared_ptr<lalr1_item_set> I = lalr1_states[I_id];
 	for (const auto& kernel : I->get_items()) {
 
@@ -854,7 +743,9 @@ void parse::grammar::determine_lookaheads(
 		lalr1_item_set original_item_set;
 		original_item_set.add_items(kernel_with_sentinel);
 
+		// TOOD: 缓存 closure 
 		std::shared_ptr<lalr1_item_set> J = closure(original_item_set);
+
 
 #ifdef __DEBUG_OUTPUT__
 		std::cout << "Closure J Items: \n" << J->to_string() << std::endl;
@@ -889,7 +780,7 @@ void parse::grammar::determine_lookaheads(
 					auto target_item_id = lr0_goto_cache_table[{I_id, X}];
 
 					for (const auto& goto_B : closured_goto_B_set->get_items())
-						if (goto_B.id == B.id && goto_B.dot_pos == B.dot_pos + 1)
+						if (goto_B.product->id == B.product->id && goto_B.dot_pos == B.dot_pos + 1)
 							propagation_graph[{I_id, kernel.id}].push_back({ target_item_id, goto_B.id });
 
 				}
@@ -928,6 +819,10 @@ void parse::grammar::set_lalr1_items_lookaheads()
 		item->add_lookaheads(spon.second);
 	}
 
+#ifdef __DEBUG__
+	std::cout << "LALR(1) States Built. Total States: " << lalr1_states.size() << std::endl;
+	std::cout << lalr1_states_to_string() << std::endl;
+#endif
 
 
 	do
@@ -984,7 +879,8 @@ void parse::grammar::build_action_table()
 		auto& state = lalr1_states[i];
 		auto J = closure(*state);
 
-		//std::cout << J->to_string() << std::endl;
+		if (i == 29)
+			std::cout << J->to_string() << std::endl;
 
 		for (auto& item : J->get_items())
 			//for (auto& item : state->get_items())
@@ -1045,9 +941,9 @@ void parse::grammar::build_action_table()
 							if (action_table[i].count(next_symbol)) {
 								auto& existing_action = action_table[i][next_symbol];
 
-								if (existing_action.type == parser_action_type_t::REDUCE) {
-									action_table[i][next_symbol] = { parser_action_type_t::SHIFT, static_cast<parser_action_value_t>(next_state) };
-								} else
+								//if (existing_action.type == parser_action_type_t::REDUCE) {
+								//	action_table[i][next_symbol] = { parser_action_type_t::SHIFT, static_cast<parser_action_value_t>(next_state) };
+								//} else
 
 								if (!(existing_action.type == parser_action_type_t::SHIFT && existing_action.value == next_state)) {
 
@@ -1157,30 +1053,36 @@ parse::lr_parser::parse_result parse::lr_parser::parse(const std::vector<std::pa
 
 			case parser_action_type_t::REDUCE: {
 
-				// find the corresponding production.
 				auto prod = grammar->get_production_by_id(a.value);
-				bool is_epsilon = (prod->right.size() == 1 && prod->right[0] == grammar->epsilon) ? true : false;
+				bool is_epsilon = (prod->right.size() == 1 && prod->right[0] == grammar->epsilon);
 
 #ifdef __LALR1_PARSER_HISTORY_INFO__
 				parse_history.push_back("Reduce: " + prod->to_string());
+				if (is_epsilon) {
+					parse_history.push_back("Epsilon production - no symbols to pop");
+				}
 #endif
-				for (size_t i = 0; i < prod->right.size(); i++) {
-					if (state_stack.empty() || symbol_stack.empty()) {
-						return { false, "fatal: symbol stack empty !", parse_history };
-					}
+
+				// 处理弹出操作 - 对于 ε-产生式，不弹出任何符号
+				if (!is_epsilon) {
+					for (size_t i = 0; i < prod->right.size(); i++) {
+						if (state_stack.empty() || symbol_stack.empty()) {
+							return { false, "fatal: symbol stack empty !", parse_history };
+						}
 
 #ifdef __LALR1_PARSER_HISTORY_INFO__
-					parse_history.push_back("Pop: State " + std::to_string(state_stack.top()));
+						parse_history.push_back("Pop: State " + std::to_string(state_stack.top()));
 #endif
-					if (is_epsilon)
-						continue;
-					state_stack.pop();
-					symbol_stack.pop();
+
+						state_stack.pop();
+						symbol_stack.pop();
+					}
 				}
 
 				if (state_stack.empty()) {
 					return { false, "fatal: state stack empty !", parse_history };
 				}
+
 
 				item_set_id_t new_state = state_stack.top();
 				symbol_t non_terminal = prod->left;
@@ -1224,18 +1126,30 @@ parse::lr_parser::parse_result parse::lr_parser::parse(const std::vector<std::pa
 		}
 		else
 		{
-			std::string s_s;
+			parse_history.push_back("\n\n");
+			std::stack<std::string> s_s;
+			std::string info;
 			for (int i = state_stack.size() - 1; i >= 0; i--) {
-				s_s += std::to_string(state_stack.top()) + "  ";
+				s_s.push(std::to_string(state_stack.top()));
 				state_stack.pop();
 			}
-			parse_history.push_back("State Stack: " + s_s);
-			s_s.clear();
+			for (int i = s_s.size() - 1; i >= 0; i--) {
+				info += s_s.top() + " ";
+				s_s.pop();
+			}
+
+			parse_history.push_back("State Stack: " + info);
 			for (int i = symbol_stack.size() - 1; i >= 0; i--) {
-				s_s += symbol_stack.top().name + "  ";
+				s_s.push(symbol_stack.top().name);
 				symbol_stack.pop();
 			}
-			parse_history.push_back("Symbol Stack: " + s_s);
+
+			info.clear();
+			for (int i = s_s.size() - 1; i >= 0; i--) {
+				info += s_s.top() + " ";
+				s_s.pop();
+			}
+			parse_history.push_back("Symbol Stack: " + info);
 
 			return { false, "ACTION(" + std::to_string(current_state) +
 				", " + current_token.name + ") doesn't have the corresponding entry.", parse_history };

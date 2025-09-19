@@ -1,14 +1,4 @@
-Program    -> StmtList
-StmtList   -> Stmt StmtList | ¦Å
-Stmt       -> AssignStmt | ExprStmt
 AssignStmt -> id = Expr ;
-ExprStmt   -> Expr ;
-
-Expr       -> Term Expr'
-Expr'      -> AddOp Term Expr' | ¦Å
-Term       -> Factor Term'
-Term'      -> MulOp Factor Term' | ¦Å
-Factor     -> id | int_lit | float_lit | ( Expr )
-
-AddOp      -> + | -
-MulOp      -> * | /
+Expr -> Expr AddOp Factor | Factor
+AddOp  -> + | -
+Factor -> id | int_lit | ( Expr )

@@ -5,10 +5,12 @@
 int main()
 {
 
+	//compiler_frontend frontend = compiler_frontend("examples/gram_exp01.txt");
 	compiler_frontend frontend = compiler_frontend("examples/gram_exp03.txt");
 	//frontend.compile("10 / 2 + 6 * 3 - 1");
+	frontend.compile("x = 5 + 3;");
 	//frontend.compile("**x = *y");
-	frontend.compile("examples/gram_exp03_test.txt", true);
+	//frontend.compile("examples/gram_exp03_test.txt", true);
 
 
 	//std::unique_ptr<parse::grammar> g = grammar_parser("gram_exp03.txt");

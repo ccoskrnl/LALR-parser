@@ -1,8 +1,11 @@
-E -> E + T
-E -> E - T
-E -> T
-T -> T * F
-T -> T / F
-T -> F
-F -> ( E )
-F -> int_lit
+Program -> StmtList
+StmtList -> Stmt StmtList | epsilon
+Stmt -> AssignStmt | ExprStmt
+AssignStmt -> id = Expr ;
+ExprStmt -> Expr ;
+
+Expr   -> Expr AddOp Term | Term
+Term   -> Term MulOp Factor | Factor
+Factor -> id | int_lit | float_lit | ( Expr )
+AddOp  -> + | -
+MulOp  -> * | /

@@ -189,7 +189,7 @@ namespace parse {
 			if (dot_pos < product->right.size()) {
 				return product->right[dot_pos];
 			}
-			return symbol_t{ "", symbol_type_t::TERMINAL };
+			return symbol_t{ "", symbol_type_t::EPSILON };
 		}
 
 		symbol_t current_symbol() const {
@@ -313,7 +313,23 @@ namespace parse {
 			}
 			return h1 ^ (h2 << 1);
 		}
+	private:
+		// 辅助函数合并哈希值
+		template <typename T>
+		void hash_combine(size_t& seed, const T& val) const {
+			std::hash<T> hasher;
+			seed ^= hasher(val) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+		}
 	};
+
+	//bool operator==(const lalr1_item_t& lhs, const lalr1_item_t& rhs) {
+	//	return lhs.product->id == rhs.product->id &&
+	//		lhs.dot_pos == rhs.dot_pos &&
+	//		lhs.id == rhs.id &&
+	//		(lhs.lookaheads == rhs.lookaheads ||
+	//			(lhs.lookaheads && rhs.lookaheads &&
+	//				*lhs.lookaheads == *rhs.lookaheads));
+	//};
 
 	struct pair_item_id_symbol_hasher {
 		size_t operator()(const std::pair<item_id_t, symbol_t>& p) const {
@@ -371,16 +387,13 @@ namespace parse {
 				}
 			}
 			return nullptr;
+
 		}
 
-		//lr0_item* find_item(production_id_t production_id, int dot_pos) {
-		//	for (auto& item : items) {
-		//		if (item.product->id == production_id && item.dot_pos == dot_pos) {
-		//			return &const_cast<lr0_item&>(item);
-		//		}
-		//	}
-		//	return nullptr;
-		//}
+		bool empty() const {
+			return this->items.empty();
+		}
+
 
 		std::unordered_set<lr0_item_t, lr0_item_hasher>& get_items() {
 			return items;
@@ -420,7 +433,7 @@ namespace parse {
 
 	class lalr1_item_set {
 	public:
-		std::unordered_set<lalr1_item_t, lr0_item_hasher> items;
+		std::unordered_set<lalr1_item_t, lalr1_item_hasher> items;
 		item_set_id_t id;
 
 		lalr1_item_set(int set_id = -1) : id(set_id) {}
@@ -445,20 +458,18 @@ namespace parse {
 				this->items.insert(i);
 			}
 		}
-		void del_items(const lalr1_item_t& item) {
-			this->items.erase(item);
+		bool del_items(const lalr1_item_t& item) {
+			return remove_item(item);
 		}
-		void del_items(const lalr1_item_set& items) {
+		bool del_items(const lalr1_item_set& items) {
+			bool result = false;
 			for (const auto& i : items.items) {
-				this->items.erase(i);
+				result = remove_item(i);
 			}
+			return result;
 		}
 
-		//std::unordered_set<lalr1_item_t, lalr1_item_hasher>& get_items() {
-		//	return items;
-		//}
-
-		auto& get_items() {
+		std::unordered_set<lalr1_item_t, lalr1_item_hasher>& get_items() {
 			return items;
 		}
 
@@ -501,9 +512,9 @@ namespace parse {
 			return nullptr;
 		}
 
-		//const std::unordered_set<lalr1_item_t, lalr1_item_hasher>& get_items() const {
-		//	return items;
-		//}
+		bool empty() const {
+			return this->items.empty();
+		}
 
 		friend std::ostream& operator<<(std::ostream& os, const lalr1_item_set& item_set) {
 
@@ -521,6 +532,30 @@ namespace parse {
 			}
 			return result;
 		}
+
+	private:
+		bool remove_item(const lalr1_item_t& target) {
+			// 首先尝试直接删除
+			if (items.erase(target) > 0) return true;
+
+			// 如果失败，查找内容相同的项
+			auto it = std::find_if(items.begin(), items.end(), [&](const auto& item) {
+				return item.product->id == target.product->id &&
+					item.dot_pos == target.dot_pos &&
+					item.id == target.id &&
+					item.lookaheads && target.lookaheads &&
+					*item.lookaheads == *target.lookaheads;
+				});
+
+			if (it != items.end()) {
+				items.erase(it);
+				return true;
+			}
+
+			return false;
+		}
+
+
 	};
 
 
@@ -536,8 +571,10 @@ namespace parse {
 	class grammar {
 	public:
 		symbol_t start_symbol;
+
 		//symbol epsilon{ "ε", symbol_type::TERMINAL };
-		symbol_t epsilon{ "epsilon", symbol_type_t::TERMINAL };
+
+		symbol_t epsilon{ "", symbol_type_t::EPSILON };
 		symbol_t end_marker{ "$", symbol_type_t::TERMINAL };
 		symbol_t lookahead_sentinel{ "#", symbol_type_t::TERMINAL };
 
