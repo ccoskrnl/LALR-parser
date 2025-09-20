@@ -8,7 +8,7 @@
 
 它接受一段文法描述，并基于这个文法生成一个LALR(1)分析表。这个分析表可以使用LR自动机进行语法分析。下面给出了一段文法描述示例：
 
-``````bnf
+```bnf
 # 1. 文法的第一行被解释为文法的起始处。
 # 2. 首字母大写的符号被解释为非终结符号。
 # 3. 通过 '< >' 包裹的符号也被解释为非终结符号。
@@ -17,12 +17,38 @@
 S -> L = R | R
 L -> * R | id
 R -> L
-``````
+```
+
+## 使用
+
+虽然改语法分析器生成器可以处理左递归和空表达式(epsilon)，但是对于移进 `规约-冲突` 仍然无能为力。考虑下面这段文法：
+```bnf
+AssignStmt -> id = Expr ;
+Expr -> Expr AddOp Term | Term
+Term -> Term MulOp Factor | Factor
+AddOp  -> + | -
+MulOp -> * | /
+Factor -> id | int_lit | ( Expr )
+```
+当使用LALR进行语法分析生成时会遇到如下的错误:
+```
+Reduce - Shift conflict at state 7 on symbol * between REDUCE(3){[ID: 3 ]  Expr -> Term } and shift to 15
+```
+
+状态7存在一个移进-规约冲突：当遇到符号`*`时，分析器不知道是应该按照产生式`Expr -> Term`进行规约，还是应该移进`*`符号并转到状态15。
+
+在状态7中，有以下项目：
+- `Expr -> Term .` (可规约项目)
+- `Term -> Term . MulOp Factor` (需要移进MulOp)
+- `MulOp -> . *` 和 `MulOp -> . /` (MulOp的产生式)
+
+当遇到`*`符号时：
+1. 可以按照`Expr -> Term`进行规约
+2. 也可以移进`*`符号，然后按照`MulOp -> *`进行规约
+
 
 ## TO-DO
 
 - [ ] 解析正则表达式作为DFA实现Lexer
-- [x] 展望符传播算法bug修复
-- [ ] 使用标准LR(0)项集构建算法
-- [ ] 直接在LR(0)项集上构建LALR(1)项集
+- [ ] 添加文法优先级
 

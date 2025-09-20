@@ -125,6 +125,8 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="demo.cpp" />
+    <ClCompile Include="grammar_parser.cpp" />
+    <ClCompile Include="lalr.cpp" />
     <ClCompile Include="lr_parser.cpp" />
   </ItemGroup>
   <ItemGroup>

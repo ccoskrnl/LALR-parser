@@ -1,11 +1,10 @@
-Program -> StmtList
-StmtList -> Stmt StmtList | epsilon
-Stmt -> AssignStmt | ExprStmt
+Program    -> StmtList
+StmtList   -> StmtList Stmt | ¦Å
+Stmt       -> AssignStmt | ExprStmt
 AssignStmt -> id = Expr ;
-ExprStmt -> Expr ;
+ExprStmt   -> Expr ;
 
-Expr   -> Expr AddOp Term | Term
-Term   -> Term MulOp Factor | Factor
-Factor -> id | int_lit | float_lit | ( Expr )
-AddOp  -> + | -
-MulOp  -> * | /
+Expr -> Term      | Expr + Term      | Expr - Term      | Expr * Factor       | Expr / Factor       | Term * Factor     | Term / Factor 
+
+Term -> Factor     | Term * Factor      | Term / Factor
+Factor -> id     | int_lit      | float_lit       | ( Expr )

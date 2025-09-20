@@ -1,4 +1,12 @@
 AssignStmt -> id = Expr ;
-Expr -> Expr AddOp Factor | Factor
+Expr -> Expr AddOp Term | Term
+Term -> Term MulOp Factor | Factor
 AddOp  -> + | -
+MulOp -> * | /
 Factor -> id | int_lit | ( Expr )
+
+
+# AssignStmt -> id = Expr ;
+# Expr -> Expr AddOp Factor | Factor
+# AddOp  -> + | -
+# Factor -> id | int_lit | ( Expr )

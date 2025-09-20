@@ -1,4 +1,4 @@
-#pragma once
+Ôªø#pragma once
 #ifndef __LR_PARSER_H__
 #define __LR_PARSER_H__
 
@@ -26,7 +26,7 @@ using parser_action_value_t = int32_t;
 using production_id_t = parser_action_value_t;
 constexpr production_id_t AUGMENTED_GRAMMAR_PROD_ID = 0;
 
-static_assert(std::is_same_v < parser_action_value_t, production_id_t> , "action_value_t and production_id_t must be the same type");
+static_assert(std::is_same_v < parser_action_value_t, production_id_t>, "action_value_t and production_id_t must be the same type");
 
 namespace parse {
 
@@ -40,7 +40,7 @@ namespace parse {
 	struct parser_action_t {
 		parser_action_type_t type;
 		parser_action_value_t value;
-		parser_action_t(parser_action_type_t t = parser_action_type_t::ERROR, parser_action_value_t v = -1) : type(t), value(v) { }
+		parser_action_t(parser_action_type_t t = parser_action_type_t::ERROR, parser_action_value_t v = -1) : type(t), value(v) {}
 
 		bool operator==(const parser_action_t& other) const {
 			return type == other.type && value == other.value;
@@ -77,7 +77,7 @@ namespace parse {
 	static_assert(
 		std::is_constructible_v<parser_action_t, parser_action_type_t, int>,
 		"action_t must be constructible from action_type_t and int"
-	);
+		);
 
 
 
@@ -133,7 +133,7 @@ namespace parse {
 		production_id_t id;
 
 		production_t(const symbol_t& l, const std::vector<symbol_t>& r)
-			: left(l), right(r){
+			: left(l), right(r) {
 
 			id = production_t::prod_id_size++;
 		}
@@ -150,41 +150,58 @@ namespace parse {
 
 	};
 
+	/*
+ * LR(0) item structure representing a production with a dot position
+ *
+ * An LR(0) item consists of a production with a dot (‚Ä¢) indicating the current parsing position.
+ * The dot divides the production into two parts: symbols that have been seen (left of dot)
+ * and symbols that are expected next (right of dot).
+ */
 	struct lr0_item_t {
+		std::shared_ptr<production_t> product;  // Pointer to the production rule
+		int dot_pos;                            // Position of the dot in the production
+		item_id_t id;                           // Unique identifier for the item
 
-		std::shared_ptr<production_t> product;
-		int dot_pos;
-		item_id_t id;
-
-		
+		/* Returns the current dot position in the production */
 		int get_dot_pos() const {
 			return dot_pos;
 		}
 
+		/* Returns the unique identifier of this item */
 		item_id_t get_id() const {
 			return id;
 		}
 
+		/* Returns the identifier of the production rule */
 		production_id_t get_production_id() const {
 			return product->id;
 		}
 
-		void set_dot_pos(int new_dot_pos){
+		/*
+		 * Updates the dot position and recalculates the item ID
+		 * The ID is constructed by combining production ID (high 32 bits) and dot position (low 32 bits)
+		 */
+		void set_dot_pos(int new_dot_pos) {
 			dot_pos = new_dot_pos;
 			id = (static_cast<item_id_t>(product->id) << 32) | (static_cast<item_id_t>(dot_pos) & 0xFFFFFFFF);
 		}
 
+		/* Returns a shared pointer to the production rule */
 		const std::shared_ptr<production_t> get_production() const {
 			return product;
 		}
 
+		/* Constructor that initializes the item with a production and dot position */
 		lr0_item_t(std::shared_ptr<production_t> prod, int dot) : product(prod), dot_pos(dot) {
 			id = (static_cast<item_id_t>(product->id) << 32) | (static_cast<item_id_t>(dot_pos) & 0xFFFFFFFF);
 		}
 
+		/* Equality operator compares both production ID and dot position */
 		bool operator==(const lr0_item_t& other) const {
 			return product->id == other.product->id && dot_pos == other.dot_pos;
 		}
+
+		/* Returns the symbol immediately following the dot position */
 		symbol_t next_symbol() const {
 			if (dot_pos < product->right.size()) {
 				return product->right[dot_pos];
@@ -192,18 +209,26 @@ namespace parse {
 			return symbol_t{ "", symbol_type_t::EPSILON };
 		}
 
+		/* Returns the symbol immediately preceding the dot position */
 		symbol_t current_symbol() const {
 			if (dot_pos > 0)
 				return product->right[dot_pos - 1];
 			return symbol_t{ "", symbol_type_t::TERMINAL };
 		}
 
+		/*
+		 * Determines if this is a kernel item
+		 * Kernel items are either the augmented start production or items with dot not at beginning
+		 */
 		bool is_kernel_item() const {
 			return dot_pos > 0 || product->id == AUGMENTED_GRAMMAR_PROD_ID;
 		}
 
+		/*
+		 * Converts the item to a human-readable string representation
+		 * Format: [ID: X] Left -> symbol1 . symbol2
+		 */
 		std::string to_string() const {
-
 			std::string result = "[ID: " + std::to_string(product->id) + " ]  " + product->left.name + " -> ";
 			for (size_t i = 0; i < product->right.size(); i++) {
 				if (i == dot_pos) {
@@ -218,60 +243,79 @@ namespace parse {
 		}
 	};
 
+	/*
+	 * LALR(1) item structure extending LR(0) item with lookahead symbols
+	 *
+	 * An LALR(1) item adds lookahead symbols to an LR(0) item, which are used to resolve
+	 * parsing conflicts by specifying which terminal symbols can follow a production.
+	 */
 	struct lalr1_item_t : lr0_item_t {
+		std::unordered_set<symbol_t, symbol_hasher> lookaheads;  // Set of lookahead symbols, avoid to modify.
 
-		std::shared_ptr<std::unordered_set<symbol_t, symbol_hasher>> lookaheads;
-
+		/* Constructor that initializes with production and dot position (empty lookaheads) */
 		lalr1_item_t(std::shared_ptr<production_t> prod, int dot)
-			: lr0_item_t(prod, dot), lookaheads(std::make_shared<std::unordered_set<symbol_t, symbol_hasher>>()) {
+			: lr0_item_t(prod, dot), lookaheads({}) {
 		}
 
+		/* Constructor that converts an LR(0) item to LALR(1) item (empty lookaheads) */
 		lalr1_item_t(const lr0_item_t& item)
-			: lr0_item_t(item.product, item.dot_pos), lookaheads(std::make_shared<std::unordered_set<symbol_t, symbol_hasher>>()) {
+			: lr0_item_t(item.product, item.dot_pos), lookaheads({ }) {
 		}
-		
+
+		/* Copy constructor that copies both LR(0) properties and lookaheads */
 		lalr1_item_t(const lalr1_item_t& item)
-			: lr0_item_t(item.product, item.dot_pos), lookaheads(std::make_shared<std::unordered_set<symbol_t, symbol_hasher>>()) {
-			this->add_lookaheads(*item.lookaheads);
+			: lr0_item_t(item.product, item.dot_pos), lookaheads({ }) {
+			this->add_lookaheads(item.lookaheads);
 		}
 
-		lalr1_item_t(std::shared_ptr<production_t> prod, int dot, const std::unordered_set<symbol_t, symbol_hasher>& lookahead)
-			: lr0_item_t(prod, dot), lookaheads(std::make_shared<std::unordered_set<symbol_t, symbol_hasher>>(lookahead)) {
+		/* Constructor that initializes with production, dot position, and lookaheads */
+		lalr1_item_t(std::shared_ptr<production_t> prod, int dot, const std::unordered_set<symbol_t, symbol_hasher>& las)
+			: lr0_item_t(prod, dot), lookaheads(las) {
 		}
 
-		lalr1_item_t(const lr0_item_t& item, const std::unordered_set<symbol_t, symbol_hasher>& lookahead)
-			: lr0_item_t(item.product, item.dot_pos), lookaheads(std::make_shared<std::unordered_set<symbol_t, symbol_hasher>>(lookahead)) {
+		/* Constructor that converts LR(0) item and adds lookaheads */
+		lalr1_item_t(const lr0_item_t& item, const std::unordered_set<symbol_t, symbol_hasher>& las)
+			: lr0_item_t(item.product, item.dot_pos), lookaheads(las) {
 		}
 
+		/* Default constructor */
 		lalr1_item_t()
-			: lr0_item_t(nullptr, 0), lookaheads(std::make_shared<std::unordered_set<symbol_t, symbol_hasher>>()) {
+			: lr0_item_t(nullptr, 0), lookaheads({ }) {
 		}
 
-
+		/* Adds multiple lookahead symbols and returns true if any were new */
 		bool add_lookaheads(const std::unordered_set<symbol_t, symbol_hasher>& las) {
 			if (las.empty())
 				return false;
-			const size_t old_size = lookaheads->size();
-			lookaheads->insert(las.begin(), las.end());
-			return old_size != lookaheads->size();
+			const size_t old_size = lookaheads.size();
+			lookaheads.insert(las.begin(), las.end());
+			return old_size != lookaheads.size();
 		}
 
-		bool add_lookahead(const symbol_t& la) {
-			const size_t old_size = lookaheads->size();
-			lookaheads->insert(la);
-			return old_size != lookaheads->size();
+		/* Adds a single lookahead symbol and returns true if it was new */
+		bool add_lookaheads(const symbol_t& la) {
+			const size_t old_size = lookaheads.size();
+			lookaheads.insert(la);
+			return old_size != lookaheads.size();
 		}
 
-		void del_lookahead(const symbol_t& la) {
-			lookaheads->erase(la);
+		/* Removes a specific lookahead symbol */
+		void del_lookaheads(const symbol_t& la) {
+			lookaheads.erase(la);
 		}
 
+		/* Removes multiple lookahead symbols */
 		void del_lookaheads(const std::unordered_set<symbol_t, symbol_hasher>& las) {
 			for (const auto& la : las) {
-				lookaheads->erase(la);
+				lookaheads.erase(la);
 			}
 		}
 
+
+		/*
+		 * Converts the item to a human-readable string representation including lookaheads
+		 * Format: [ID: X] Left -> symbol1 . symbol2 , { lookahead1 lookahead2 }
+		 */
 		std::string to_string() const {
 			std::string result = "[ID: " + std::to_string(product->id) + " ]  " + product->left.name + " -> ";
 			for (size_t i = 0; i < product->right.size(); i++) {
@@ -286,7 +330,7 @@ namespace parse {
 
 			result += " , { ";
 
-			for (const auto& la : *lookaheads) {
+			for (const auto& la : lookaheads) {
 				result += la.name + " ";
 			}
 			result += "}";
@@ -294,7 +338,7 @@ namespace parse {
 		}
 	};
 
-
+	/* Hash function for LR(0) items based on production ID and dot position */
 	struct lr0_item_hasher {
 		size_t operator()(const lr0_item_t& item) const {
 			size_t h1 = std::hash<production_id_t>()(item.product->id);
@@ -303,18 +347,23 @@ namespace parse {
 		}
 	};
 
+	/* Hash function for LALR(1) items based on production ID, dot position, and lookaheads */
 	struct lalr1_item_hasher {
 		size_t operator()(const lalr1_item_t& item) const {
-			size_t h1 = std::hash<production_id_t>()(item.product->id);
-			size_t h2 = std::hash<int>()(item.dot_pos);
-			size_t h3 = 0;
-			for (const auto& sym : *item.lookaheads) {
-				h3 ^= symbol_hasher()(sym) + 0x9e3779b9 + (h3 << 6) + (h3 >> 2);
+			size_t seed = 0;
+			hash_combine(seed, item.product->id);
+			hash_combine(seed, item.dot_pos);
+			hash_combine(seed, item.id);
+
+			for (const auto& sym : item.lookaheads) {
+				hash_combine(seed, symbol_hasher()(sym));
 			}
-			return h1 ^ (h2 << 1);
+
+			return seed;
 		}
+
 	private:
-		// ∏®÷˙∫Ø ˝∫œ≤¢π˛œ£÷µ
+		/* Helper function to combine hash values using boost-inspired method */
 		template <typename T>
 		void hash_combine(size_t& seed, const T& val) const {
 			std::hash<T> hasher;
@@ -322,15 +371,13 @@ namespace parse {
 		}
 	};
 
-	//bool operator==(const lalr1_item_t& lhs, const lalr1_item_t& rhs) {
-	//	return lhs.product->id == rhs.product->id &&
-	//		lhs.dot_pos == rhs.dot_pos &&
-	//		lhs.id == rhs.id &&
-	//		(lhs.lookaheads == rhs.lookaheads ||
-	//			(lhs.lookaheads && rhs.lookaheads &&
-	//				*lhs.lookaheads == *rhs.lookaheads));
-	//};
 
+	/*
+	 * Hash function for pairs of item_id_t and symbol_t
+	 *
+	 * This struct provides a hash function for std::pair<item_id_t, symbol_t> objects,
+	 * combining the hash values of both elements using a method inspired by boost's hash_combine.
+	 */
 	struct pair_item_id_symbol_hasher {
 		size_t operator()(const std::pair<item_id_t, symbol_t>& p) const {
 			size_t h1 = std::hash<item_id_t>()(p.first);
@@ -339,6 +386,12 @@ namespace parse {
 		}
 	};
 
+	/*
+	 * Hash function for pairs of item_set_id_t and item_id_t
+	 *
+	 * This struct provides a hash function for std::pair<item_set_id_t, item_id_t> objects,
+	 * combining the hash values of both elements using a method inspired by boost's hash_combine.
+	 */
 	struct pair_items_state_item_id_hasher {
 		size_t operator()(const std::pair<item_set_id_t, item_id_t>& p) const {
 			size_t h1 = std::hash<item_set_id_t>()(p.first);
@@ -347,16 +400,24 @@ namespace parse {
 		}
 	};
 
-
+	/*
+	 * Class representing a set of LR(0) items used in parser construction
+	 *
+	 * An LR(0) item set contains multiple LR(0) items that share the same core (production and dot position)
+	 * and is used to represent states in the LR(0) automaton during parser construction.
+	 */
 	class lr0_item_set {
-
 	public:
-		std::unordered_set<lr0_item_t, lr0_item_hasher> items;
-		item_set_id_t id;
+		std::unordered_set<lr0_item_t, lr0_item_hasher> items;  // Collection of LR(0) items
+		item_set_id_t id;                                        // Unique identifier for this item set
 
+		/* Constructor that optionally sets the item set ID */
 		lr0_item_set(int set_id = -1) : id(set_id) {}
+
+		/* Copy constructor */
 		lr0_item_set(const lr0_item_set& other) : id(other.id), items(other.items) {}
 
+		/* Equality comparison based on the core items (production ID and dot position) */
 		bool operator==(const lr0_item_set& other) const {
 			std::set<std::pair<production_id_t, int>> core_items, other_core_items;
 
@@ -370,39 +431,45 @@ namespace parse {
 
 			return core_items == other_core_items;
 		}
+
+		/* Adds a single LR(0) item to the set */
 		void add_items(const lr0_item_t& item) {
 			this->items.insert(item);
 		}
+
+		/* Adds all items from another LR(0) item set */
 		void add_items(const lr0_item_set& items) {
 			for (const auto& i : items.items) {
 				this->items.insert(i);
 			}
 		}
 
+		/* Finds an item in the set based on its core (production ID and dot position) */
 		const lr0_item_t* find_item(const lr0_item_t& core) const {
 			for (auto& item : items) {
 				if (item.product->id == core.product->id && item.dot_pos == core.dot_pos) {
-					//return &const_cast<lr0_item&>(item);
 					return &item;
 				}
 			}
 			return nullptr;
-
 		}
 
+		/* Checks if the item set is empty */
 		bool empty() const {
 			return this->items.empty();
 		}
 
-
+		/* Returns a reference to the underlying unordered set of items */
 		std::unordered_set<lr0_item_t, lr0_item_hasher>& get_items() {
 			return items;
 		}
 
+		/* Returns a const reference to the underlying unordered set of items */
 		const std::unordered_set<lr0_item_t, lr0_item_hasher>& get_items() const {
 			return items;
 		}
 
+		/* Output stream operator for printing the item set */
 		friend std::ostream& operator<<(std::ostream& os, const lr0_item_set& item_set) {
 			os << "Item Set ID: " << item_set.id << std::endl;
 			for (const auto& item : item_set.items) {
@@ -411,6 +478,7 @@ namespace parse {
 			return os;
 		}
 
+		/* Converts the item set to a string representation */
 		std::string to_string() const {
 			std::string result = "Item Set ID: " + std::to_string(id) + "\n";
 			for (const auto& item : items) {
@@ -419,6 +487,7 @@ namespace parse {
 			return result;
 		}
 
+		/* Returns all symbols that can be used for transitions from this item set */
 		std::vector<symbol_t> get_transition_symbols() const {
 			std::unordered_set<symbol_t, symbol_hasher> symbols;
 			for (const auto& item : items) {
@@ -431,14 +500,24 @@ namespace parse {
 		}
 	};
 
+	/*
+	 * Class representing a set of LALR(1) items used in parser construction
+	 *
+	 * An LALR(1) item set extends LR(0) item sets with lookahead information,
+	 * which is crucial for resolving parsing conflicts in LALR(1) parsers.
+	 */
 	class lalr1_item_set {
 	public:
-		std::unordered_set<lalr1_item_t, lalr1_item_hasher> items;
-		item_set_id_t id;
+		std::unordered_set<lalr1_item_t, lalr1_item_hasher> items;  // Collection of LALR(1) items
+		item_set_id_t id;                                            // Unique identifier for this item set
 
+		/* Constructor that optionally sets the item set ID */
 		lalr1_item_set(int set_id = -1) : id(set_id) {}
+
+		/* Copy constructor */
 		lalr1_item_set(const lalr1_item_set& other) : id(other.id), items(other.items) {}
 
+		/* Equality comparison based on the core items (production ID and dot position) */
 		bool operator==(const lalr1_item_set& other) const {
 			std::set<std::pair<production_id_t, int>> core_items, other_core_items;
 			for (const lalr1_item_t& item : items) {
@@ -450,17 +529,24 @@ namespace parse {
 			return core_items == other_core_items;
 		}
 
+		/* Adds a single LALR(1) item to the set */
 		void add_items(const lalr1_item_t& item) {
 			this->items.insert(item);
 		}
+
+		/* Adds all items from another LALR(1) item set */
 		void add_items(const lalr1_item_set& items) {
 			for (const auto& i : items.items) {
 				this->items.insert(i);
 			}
 		}
+
+		/* Removes a single item from the set (alias for remove_item) */
 		bool del_items(const lalr1_item_t& item) {
 			return remove_item(item);
 		}
+
+		/* Removes all items from another LALR(1) item set */
 		bool del_items(const lalr1_item_set& items) {
 			bool result = false;
 			for (const auto& i : items.items) {
@@ -469,21 +555,46 @@ namespace parse {
 			return result;
 		}
 
+		/* Returns a reference to the underlying unordered set of items */
 		std::unordered_set<lalr1_item_t, lalr1_item_hasher>& get_items() {
 			return items;
 		}
 
+		/*
+		 * Adds lookahead symbols to a specific item identified by its ID
+		 * Returns true if any new lookaheads were added
+		 */
+		bool add_lookaheads_for_item(const item_id_t id, const std::unordered_set<symbol_t, symbol_hasher>& las) {
+			const lalr1_item_t* original_i = find_item(id);
 
+			if (original_i == nullptr)
+				return false;
+
+			size_t before_size = original_i->lookaheads.size();
+			lalr1_item_t modified_i = lalr1_item_t(*original_i);
+			del_items(modified_i);
+
+			// Copy the original item and add new lookaheads
+			modified_i.add_lookaheads(las);
+			add_items(modified_i);
+
+			if (modified_i.lookaheads.size() != before_size)
+				return true;
+
+			return false;
+		}
+
+		/* Finds an item in the set based on its core (production ID and dot position) */
 		const lalr1_item_t* find_item(const lr0_item_t& core) const {
 			for (const auto& item : items) {
 				if (item.product->id == core.product->id && item.dot_pos == core.dot_pos) {
-					//return &const_cast<lalr1_item&>(item);
 					return &item;
 				}
 			}
 			return nullptr;
 		}
 
+		/* Finds an item in the set based on its unique ID */
 		const lalr1_item_t* find_item(const item_id_t& id) const {
 			for (const auto& item : items) {
 				if (id == item.id)
@@ -491,33 +602,14 @@ namespace parse {
 			}
 			return nullptr;
 		}
-		
-		lalr1_item_t* find_mutable_item(const lr0_item_t& core){
-			for (auto& item : items) {
-				if (item.product->id == core.product->id && item.dot_pos == core.dot_pos) {
-					return &const_cast<lalr1_item_t&>(item);
-					//return item;
-				}
-			}
-			return nullptr;
-		}
 
-		lalr1_item_t* find_mutable_item(const item_id_t id){
-			for (auto& item : items) {
-				if (id == item.id) {
-					return &const_cast<lalr1_item_t&>(item);
-					//return item;
-				}
-			}
-			return nullptr;
-		}
-
+		/* Checks if the item set is empty */
 		bool empty() const {
 			return this->items.empty();
 		}
 
+		/* Output stream operator for printing the item set */
 		friend std::ostream& operator<<(std::ostream& os, const lalr1_item_set& item_set) {
-
 			os << "Item Set ID: " << item_set.id << std::endl;
 			for (const auto& item : item_set.items) {
 				os << "  " << item.to_string() << std::endl;
@@ -525,6 +617,7 @@ namespace parse {
 			return os;
 		}
 
+		/* Converts the item set to a string representation */
 		std::string to_string() const {
 			std::string result = "Item Set ID: " + std::to_string(id) + "\n";
 			for (const auto& item : items) {
@@ -534,17 +627,20 @@ namespace parse {
 		}
 
 	private:
+		/*
+		 * Removes a specific item from the set
+		 * First attempts direct hash-based removal, then falls back to content-based search
+		 */
 		bool remove_item(const lalr1_item_t& target) {
-			//  ◊œ»≥¢ ‘÷±Ω”…æ≥˝
+			// First try direct removal (if hash is correct)
 			if (items.erase(target) > 0) return true;
 
-			// »Áπ˚ ß∞‹£¨≤È’“ƒ⁄»›œ‡Õ¨µƒœÓ
+			// If that fails, search for item with matching content
 			auto it = std::find_if(items.begin(), items.end(), [&](const auto& item) {
 				return item.product->id == target.product->id &&
 					item.dot_pos == target.dot_pos &&
 					item.id == target.id &&
-					item.lookaheads && target.lookaheads &&
-					*item.lookaheads == *target.lookaheads;
+					item.lookaheads == target.lookaheads; // Direct set comparison
 				});
 
 			if (it != items.end()) {
@@ -554,11 +650,14 @@ namespace parse {
 
 			return false;
 		}
-
-
 	};
 
-
+	/*
+	 * Hash function for pairs of item_set_id_t and symbol_t
+	 *
+	 * This struct provides a hash function for std::pair<item_set_id_t, symbol_t> objects,
+	 * combining the hash values of both elements using a method inspired by boost's hash_combine.
+	 */
 	struct pair_item_set_symbol_hasher {
 		size_t operator()(const std::pair<item_set_id_t, symbol_t>& p) const {
 			size_t h1 = std::hash<item_set_id_t>()(p.first);
@@ -567,80 +666,45 @@ namespace parse {
 		}
 	};
 
-
-	class grammar {
+	/*
+ * Main class representing an LALR(1) grammar and its associated parsing tables
+ *
+ * This class encapsulates a complete LALR(1) grammar, including productions, symbols,
+ * and the algorithms to compute FIRST sets, build LR(0) and LALR(1) states, and
+ * construct the ACTION and GOTO tables used by the parser.
+ */
+	class lalr_grammar {
 	public:
-		symbol_t start_symbol;
+		symbol_t start_symbol;  // The start symbol of the grammar
 
-		//symbol epsilon{ "¶≈", symbol_type::TERMINAL };
+		// Special symbols used in parsing
+		symbol_t epsilon{ "", symbol_type_t::EPSILON };          // Epsilon (empty) symbol
+		symbol_t end_marker{ "$", symbol_type_t::TERMINAL };     // End of input marker
+		symbol_t lookahead_sentinel{ "#", symbol_type_t::TERMINAL };  // Special symbol for lookahead computation
 
-		symbol_t epsilon{ "", symbol_type_t::EPSILON };
-		symbol_t end_marker{ "$", symbol_type_t::TERMINAL };
-		symbol_t lookahead_sentinel{ "#", symbol_type_t::TERMINAL };
+		// Grammar components
+		std::unordered_map<symbol_t, std::vector<std::shared_ptr<production_t>>, symbol_hasher> productions;  // Productions organized by left-hand side
+		std::unordered_set<symbol_t, symbol_hasher> terminals;     // Set of terminal symbols
+		std::unordered_set<symbol_t, symbol_hasher> non_terminals; // Set of non-terminal symbols
 
-		std::unordered_map<symbol_t, std::vector<std::shared_ptr<production_t>>, symbol_hasher> productions;
-		std::unordered_set<symbol_t, symbol_hasher> terminals;
-		std::unordered_set<symbol_t, symbol_hasher> non_terminals;
+		// Computed sets and tables
+		std::unordered_map<symbol_t, std::unordered_set<symbol_t, symbol_hasher>, symbol_hasher> first_sets;  // FIRST sets for symbols
+		std::vector<std::shared_ptr<lalr1_item_set>> lalr1_states;  // LALR(1) states
+		std::unordered_map<item_set_id_t, std::unordered_map<parse::symbol_t, parse::parser_action_t, parse::symbol_hasher>> action_table;  // ACTION table
+		std::unordered_map<std::pair<item_set_id_t, symbol_t>, item_set_id_t, pair_item_set_symbol_hasher> goto_table;  // GOTO table
 
-		std::unordered_map<symbol_t, std::unordered_set<symbol_t, symbol_hasher>, symbol_hasher> first_sets;
-		std::unordered_map<symbol_t, std::unordered_set<symbol_t, symbol_hasher>, symbol_hasher> follow_sets;
-
-
-
-		std::unordered_map<item_set_id_t, std::unordered_map<parse::symbol_t, parse::parser_action_t, parse::symbol_hasher>> action_table;
-		std::unordered_map<std::pair<item_set_id_t, symbol_t>, item_set_id_t, pair_item_set_symbol_hasher> goto_table;
-
-		std::vector<std::shared_ptr<lr0_item_set>> lr0_states;
-		std::unordered_map<std::pair<item_set_id_t, symbol_t>, item_set_id_t, pair_item_set_symbol_hasher> lr0_goto_cache_table;
-		std::vector<std::shared_ptr<lalr1_item_set>> lalr1_states;
-
-
-		//grammar() {
-		//	terminals.insert(symbol("int", symbol_type::TERMINAL));
-		//	terminals.insert(symbol("float", symbol_type::TERMINAL));
-		//	terminals.insert(symbol("char", symbol_type::TERMINAL));
-		//	terminals.insert(symbol("bool", symbol_type::TERMINAL));
-		//	terminals.insert(symbol("id", symbol_type::TERMINAL));
-		//	terminals.insert(symbol("int_lit", symbol_type::TERMINAL));
-		//	terminals.insert(symbol("float_lit", symbol_type::TERMINAL));
-		//	terminals.insert(symbol("char_lit", symbol_type::TERMINAL));
-		//	terminals.insert(symbol("bool_lit", symbol_type::TERMINAL));
-		//	terminals.insert(symbol("+", symbol_type::TERMINAL));
-		//	terminals.insert(symbol("-", symbol_type::TERMINAL));
-		//	terminals.insert(symbol("*", symbol_type::TERMINAL));
-		//	terminals.insert(symbol("/", symbol_type::TERMINAL));
-		//	terminals.insert(symbol("=", symbol_type::TERMINAL));
-		//	terminals.insert(symbol("==", symbol_type::TERMINAL));
-		//	terminals.insert(symbol("!=", symbol_type::TERMINAL));
-		//	terminals.insert(symbol("<", symbol_type::TERMINAL));
-		//	terminals.insert(symbol(">", symbol_type::TERMINAL));
-		//	terminals.insert(symbol("<=", symbol_type::TERMINAL));
-		//	terminals.insert(symbol(">=", symbol_type::TERMINAL));
-		//	terminals.insert(symbol("&&", symbol_type::TERMINAL));
-		//	terminals.insert(symbol("||", symbol_type::TERMINAL));
-		//	terminals.insert(symbol("!", symbol_type::TERMINAL));
-		//	terminals.insert(symbol("(", symbol_type::TERMINAL));
-		//	terminals.insert(symbol(")", symbol_type::TERMINAL));
-		//	terminals.insert(symbol("{", symbol_type::TERMINAL));
-		//	terminals.insert(symbol("}", symbol_type::TERMINAL));
-		//	terminals.insert(symbol(";", symbol_type::TERMINAL));
-		//	terminals.insert(symbol(",", symbol_type::TERMINAL));
-		//	terminals.insert(symbol("if", symbol_type::TERMINAL));
-		//	terminals.insert(symbol("else", symbol_type::TERMINAL));
-		//	terminals.insert(symbol("while", symbol_type::TERMINAL));
-		//	terminals.insert(symbol("return", symbol_type::TERMINAL));
-		//}
-
+		/* Returns all terminal symbols in the grammar */
 		const std::unordered_set<symbol_t, symbol_hasher>& all_symbols() const {
 			return terminals;
 		}
 
+		/* Adds a production to the grammar with the given left-hand side and right-hand side symbols */
 		void add_production(const symbol_t& left, const std::vector<symbol_t>& right) {
-
 			std::shared_ptr<production_t> prod = std::make_shared<production_t>(left, right);
 			productions[left].push_back(prod);
 			non_terminals.insert(left);
 
+			// Add symbols to appropriate sets
 			for (const auto& sym : right) {
 				if (sym.type == symbol_type_t::TERMINAL && sym.name != epsilon.name) {
 					terminals.insert(sym);
@@ -651,6 +715,7 @@ namespace parse {
 			}
 		}
 
+		/* Returns all productions for a given symbol (left-hand side) */
 		const std::vector<std::shared_ptr<production_t>> get_productions_for(const symbol_t& symbol) const {
 			static std::vector<std::shared_ptr<production_t>> empty;
 			auto it = productions.find(symbol);
@@ -658,6 +723,7 @@ namespace parse {
 			return empty;
 		}
 
+		/* Finds a production by its unique identifier */
 		std::shared_ptr<production_t> get_production_by_id(production_id_t id) const {
 			for (const auto& [left, prods] : productions) {
 				for (const auto& prod : prods) {
@@ -669,39 +735,40 @@ namespace parse {
 			return nullptr;
 		}
 
-		std::shared_ptr<lr0_item_set> lr0_closure(const lr0_item_set& I) const;
-		std::shared_ptr<lr0_item_set> lr0_go_to(const lr0_item_set& I, const symbol_t& X) const;
-		std::shared_ptr<lalr1_item_set> closure(const lalr1_item_set& I);
-		std::shared_ptr<lalr1_item_set> go_to(const lalr1_item_set& I, const symbol_t& X);
+		// Core grammar algorithms
+		std::shared_ptr<lr0_item_set> lr0_closure(const lr0_item_set& I) const;  // Computes LR(0) closure
+		std::shared_ptr<lr0_item_set> lr0_go_to(const lr0_item_set& I, const symbol_t& X) const;  // Computes LR(0) GOTO
+		std::shared_ptr<lalr1_item_set> closure(const lalr1_item_set& I);  // Computes LALR(1) closure
+		std::shared_ptr<lalr1_item_set> go_to(const lalr1_item_set& I, const symbol_t& X);  // Computes LALR(1) GOTO
 
-		void comp_first_sets();
-		std::unordered_set<symbol_t, symbol_hasher> comp_first_of_sequence(
+		void comp_first_sets();  // Computes FIRST sets for all symbols
+		std::unordered_set<symbol_t, symbol_hasher> comp_first_of_sequence(  // Computes FIRST set for a sequence
 			const std::vector<symbol_t>& sequence,
 			const std::unordered_set<symbol_t, symbol_hasher>& lookaheads = {}
 		);
 
-		void build_lr0_states();
-		void initialize_lalr1_states();
+		std::unique_ptr<std::vector<std::shared_ptr<lr0_item_set>>> build_lr0_states();  // Builds LR(0) states
+		void initialize_lalr1_states();  // Initializes LALR(1) states from LR(0) states
 
-		void propagate_lookaheads(
-			const lalr1_item_t& i, const parse::symbol_t& X, item_set_id_t set_id,
-			std::unordered_map<item_id_t, std::vector<std::pair<item_set_id_t, item_id_t>>>& propagation_graph,
-			std::unordered_map<item_id_t, std::unordered_set<parse::symbol_t, parse::symbol_hasher>>& spontaneous_la
-		);
-
-		void determine_lookaheads(
+		void determine_lookaheads(  // Determines lookaheads for LALR(1) items
 			const item_set_id_t I_id,
 			const symbol_t X,
 			std::unordered_map<std::pair<item_set_id_t, item_id_t>, std::vector<std::pair<item_set_id_t, item_id_t>>, pair_items_state_item_id_hasher>& propagation_graph,
 			std::unordered_map<std::pair<item_set_id_t, item_id_t>, std::unordered_set<parse::symbol_t, parse::symbol_hasher>, pair_items_state_item_id_hasher>& spontaneous_lookaheads
 		);
 
-		void set_lalr1_items_lookaheads();
+		void set_lalr1_items_lookaheads();  // Sets lookaheads for all LALR(1) items
+		void build_action_table();  // Builds the ACTION table from LALR(1) states
 
-		void build_action_table();
+		/* Main build function that constructs all components of the LALR(1) parser */
+		void build() {
+			comp_first_sets();
+			initialize_lalr1_states();
+			set_lalr1_items_lookaheads();
+			build_action_table();
+		}
 
-		void build();
-
+		/* Converts all productions to a string representation */
 		std::string productions_to_string() const {
 			std::string result;
 			for (const auto& sym : productions) {
@@ -709,11 +776,11 @@ namespace parse {
 				for (const auto& prod : sym.second) {
 					result += "\t" + prod->to_string() + "\n";
 				}
-				
 			}
 			return result;
 		}
 
+		/* Converts all LALR(1) states to a string representation */
 		std::string lalr1_states_to_string() {
 			std::string result;
 			for (const std::shared_ptr<lalr1_item_set> state : lalr1_states) {
@@ -725,14 +792,14 @@ namespace parse {
 		std::string action_table_to_string() const {
 			std::stringstream ss;
 
-			//  ’ºØÀ˘”–◊¥Ã¨ID≤¢≈≈–Ú
+			// Êî∂ÈõÜÊâÄÊúâÁä∂ÊÄÅIDÂπ∂ÊéíÂ∫è
 			std::vector<item_set_id_t> state_ids;
 			for (const auto& state_entry : action_table) {
 				state_ids.push_back(state_entry.first);
 			}
 			std::sort(state_ids.begin(), state_ids.end());
 
-			//  ’ºØÀ˘”–∑˚∫≈≤¢≈≈–Ú£®∞¥√˚≥∆£©
+			// Êî∂ÈõÜÊâÄÊúâÁ¨¶Âè∑Âπ∂ÊéíÂ∫èÔºàÊåâÂêçÁß∞Ôºâ
 			std::vector<parse::symbol_t> symbols;
 			std::unordered_set<std::string> symbol_names;
 
@@ -745,13 +812,13 @@ namespace parse {
 				}
 			}
 
-			// ∞¥∑˚∫≈√˚≥∆≈≈–Ú
+			// ÊåâÁ¨¶Âè∑ÂêçÁß∞ÊéíÂ∫è
 			std::sort(symbols.begin(), symbols.end(),
 				[](const parse::symbol_t& a, const parse::symbol_t& b) {
 					return a.name < b.name;
 				});
 
-			//  ‰≥ˆ±ÌÕ∑
+			// ËæìÂá∫Ë°®Â§¥
 			ss << "ACTION Table:\n";
 			ss << std::setw(8) << "State";
 			for (const auto& sym : symbols) {
@@ -759,7 +826,7 @@ namespace parse {
 			}
 			ss << "\n";
 
-			//  ‰≥ˆ√ø∏ˆ◊¥Ã¨µƒ––
+			// ËæìÂá∫ÊØè‰∏™Áä∂ÊÄÅÁöÑË°å
 			for (const auto& state_id : state_ids) {
 				ss << std::setw(8) << state_id;
 
@@ -790,7 +857,7 @@ namespace parse {
 			ss << "Detailed ACTION Table:\n";
 			ss << "======================\n";
 
-			//  ’ºØÀ˘”–◊¥Ã¨ID≤¢≈≈–Ú
+			// Êî∂ÈõÜÊâÄÊúâÁä∂ÊÄÅIDÂπ∂ÊéíÂ∫è
 			std::vector<item_set_id_t> state_ids;
 			for (const auto& state_entry : action_table) {
 				state_ids.push_back(state_entry.first);
@@ -802,7 +869,7 @@ namespace parse {
 
 				auto state_it = action_table.find(state_id);
 				if (state_it != action_table.end()) {
-					//  ’ºØ∑˚∫≈≤¢≈≈–Ú
+					// Êî∂ÈõÜÁ¨¶Âè∑Âπ∂ÊéíÂ∫è
 					std::vector<parse::symbol_t> symbols;
 					for (const auto& action_entry : state_it->second) {
 						symbols.push_back(action_entry.first);
@@ -823,14 +890,14 @@ namespace parse {
 				}
 				ss << "\n";
 			}
-			
+
 			return ss.str();
 		}
 
 		std::string goto_table_to_string() const {
 			std::stringstream ss;
 
-			//  ’ºØÀ˘”–◊¥Ã¨ID
+			// Êî∂ÈõÜÊâÄÊúâÁä∂ÊÄÅID
 			std::set<item_set_id_t> state_ids;
 			std::set<symbol_t> symbols;
 
@@ -839,7 +906,7 @@ namespace parse {
 				symbols.insert(entry.first.second);
 			}
 
-			// ◊™ªªŒ™≈≈–Ú∫ÛµƒœÚ¡ø“‘±„”––Ú ‰≥ˆ
+			// ËΩ¨Êç¢‰∏∫ÊéíÂ∫èÂêéÁöÑÂêëÈáè‰ª•‰æøÊúâÂ∫èËæìÂá∫
 			std::vector<item_set_id_t> sorted_states(state_ids.begin(), state_ids.end());
 			std::sort(sorted_states.begin(), sorted_states.end());
 
@@ -849,7 +916,7 @@ namespace parse {
 					return a.name < b.name;
 				});
 
-			//  ‰≥ˆ±ÌÕ∑
+			// ËæìÂá∫Ë°®Â§¥
 			ss << "GOTO Table:\n";
 			ss << std::setw(8) << "State";
 			for (const auto& sym : sorted_symbols) {
@@ -857,7 +924,7 @@ namespace parse {
 			}
 			ss << "\n\n";
 
-			//  ‰≥ˆ√ø∏ˆ◊¥Ã¨µƒ––
+			// ËæìÂá∫ÊØè‰∏™Áä∂ÊÄÅÁöÑË°å
 			for (const auto& state : sorted_states) {
 				ss << std::setw(8) << state;
 
@@ -880,14 +947,14 @@ namespace parse {
 			return ss.str();
 		}
 
-		// »Áπ˚–Ë“™∏¸œÍœ∏µƒ ‰≥ˆ£¨ø…“‘ÃÌº”“ª∏ˆ∏¸œÍœ∏µƒ∞Ê±æ
+		// Â¶ÇÊûúÈúÄË¶ÅÊõ¥ËØ¶ÁªÜÁöÑËæìÂá∫ÔºåÂèØ‰ª•Ê∑ªÂä†‰∏Ä‰∏™Êõ¥ËØ¶ÁªÜÁöÑÁâàÊú¨
 		std::string goto_table_to_string_detailed() const {
 			std::stringstream ss;
 
 			ss << "Detailed GOTO Table:\n";
 			ss << "====================\n";
 
-			//  ’ºØÀ˘”–◊¥Ã¨ID≤¢≈≈–Ú
+			// Êî∂ÈõÜÊâÄÊúâÁä∂ÊÄÅIDÂπ∂ÊéíÂ∫è
 			std::set<item_set_id_t> state_ids;
 			for (const auto& entry : goto_table) {
 				state_ids.insert(entry.first.first);
@@ -899,7 +966,7 @@ namespace parse {
 			for (const auto& state : sorted_states) {
 				ss << "State " << state << ":\n";
 
-				//  ’ºØ∏√◊¥Ã¨µƒÀ˘”–GOTOÃıƒø
+				// Êî∂ÈõÜËØ•Áä∂ÊÄÅÁöÑÊâÄÊúâGOTOÊù°ÁõÆ
 				std::vector<std::pair<symbol_t, item_set_id_t>> entries;
 				for (const auto& entry : goto_table) {
 					if (entry.first.first == state) {
@@ -907,18 +974,18 @@ namespace parse {
 					}
 				}
 
-				// ∞¥∑˚∫≈√˚≥∆≈≈–Ú
+				// ÊåâÁ¨¶Âè∑ÂêçÁß∞ÊéíÂ∫è
 				std::sort(entries.begin(), entries.end(),
 					[](const std::pair<symbol_t, item_set_id_t>& a,
 						const std::pair<symbol_t, item_set_id_t>& b) {
 							return a.first.name < b.first.name;
 					});
 
-				//  ‰≥ˆ√ø∏ˆGOTOÃıƒø
+				// ËæìÂá∫ÊØè‰∏™GOTOÊù°ÁõÆ
 				for (const auto& entry : entries) {
 					if (entry.second != 0)
 						ss << "  " << std::setw(10) << entry.first.name << " : "
-							<< entry.second << "\n";
+						<< entry.second << "\n";
 				}
 
 				ss << "\n";
@@ -927,14 +994,14 @@ namespace parse {
 			return ss.str();
 		}
 
-		// ∞¥∑˚∫≈∑÷◊ÈµƒGOTO±Ì ”Õº
+		// ÊåâÁ¨¶Âè∑ÂàÜÁªÑÁöÑGOTOË°®ËßÜÂõæ
 		std::string goto_table_to_string_by_symbol() const {
 			std::stringstream ss;
 
 			ss << "GOTO Table Grouped by Symbol:\n";
 			ss << "=============================\n";
 
-			//  ’ºØÀ˘”–∑˚∫≈≤¢≈≈–Ú
+			// Êî∂ÈõÜÊâÄÊúâÁ¨¶Âè∑Âπ∂ÊéíÂ∫è
 			std::set<symbol_t> symbols;
 			for (const auto& entry : goto_table) {
 				symbols.insert(entry.first.second);
@@ -949,7 +1016,7 @@ namespace parse {
 			for (const auto& sym : sorted_symbols) {
 				ss << "Symbol " << sym.name << ":\n";
 
-				//  ’ºØ∏√∑˚∫≈µƒÀ˘”–GOTOÃıƒø
+				// Êî∂ÈõÜËØ•Á¨¶Âè∑ÁöÑÊâÄÊúâGOTOÊù°ÁõÆ
 				std::vector<std::pair<item_set_id_t, item_set_id_t>> entries;
 				for (const auto& entry : goto_table) {
 					if (entry.first.second == sym) {
@@ -957,14 +1024,14 @@ namespace parse {
 					}
 				}
 
-				// ∞¥‘¥◊¥Ã¨≈≈–Ú
+				// ÊåâÊ∫êÁä∂ÊÄÅÊéíÂ∫è
 				std::sort(entries.begin(), entries.end(),
 					[](const std::pair<item_set_id_t, item_set_id_t>& a,
 						const std::pair<item_set_id_t, item_set_id_t>& b) {
 							return a.first < b.first;
 					});
 
-				//  ‰≥ˆ√ø∏ˆGOTOÃıƒø
+				// ËæìÂá∫ÊØè‰∏™GOTOÊù°ÁõÆ
 				for (const auto& entry : entries) {
 					ss << "  " << std::setw(4) << entry.first << " -> "
 						<< entry.second << "\n";
@@ -976,17 +1043,14 @@ namespace parse {
 			return ss.str();
 		}
 
-		friend std::ostream& operator<<(std::ostream& os, const grammar& g) {
+		/* Output stream operator for printing the grammar */
+		friend std::ostream& operator<<(std::ostream& os, const lalr_grammar& g) {
 			for (const auto& [left, prods] : g.productions) {
 				for (const auto& prod : prods) {
 					os << left.name << " -> ";
 					for (const auto& sym : prod->right) {
 						os << sym.name << " ";
 					}
-					//// TODO
-					//if (!prod->action.empty()) {
-					//	os << "{" << prod->action.to_string() << "}";
-					//}
 					os << std::endl;
 				}
 			}
@@ -994,19 +1058,24 @@ namespace parse {
 		}
 	};
 
+	/*
+	 * Lexical analyzer class that converts input strings into tokens
+	 *
+	 * This class uses regular expressions to match tokens in the input stream,
+	 * handling whitespace and comments, and reporting lexical errors.
+	 */
 	class lexer {
 	private:
+		std::vector<std::pair<std::regex, parse::symbol_t>> token_patterns;  // Regex patterns for tokens
+		parse::symbol_t end_marker{ "$", parse::symbol_type_t::TERMINAL };   // End of input marker
+		std::vector<std::string> errors;      // Collection of error messages
+		size_t line_number = 1;               // Current line number in input
+		size_t column_number = 1;             // Current column number in input
 
-		std::vector<std::pair<std::regex, parse::symbol_t>> token_patterns;
-		parse::symbol_t end_marker{ "$", parse::symbol_type_t::TERMINAL };
-		std::vector<std::string> errors;
-		size_t line_number = 1;
-		size_t column_number = 1;
-
-		// Ã¯π˝ø’∞◊◊÷∑˚∫Õ◊¢ Õ
+		/* Skips whitespace and comments in the input string */
 		void skip_whitespace_and_comments(const std::string& input, size_t& pos) {
 			while (pos < input.size()) {
-				// Ã¯π˝ø’∞◊◊÷∑˚
+				// Skip whitespace characters
 				if (std::isspace(input[pos])) {
 					if (input[pos] == '\n') {
 						line_number++;
@@ -1019,7 +1088,7 @@ namespace parse {
 					continue;
 				}
 
-				// ºÏ≤Èµ•––◊¢ Õ
+				// Handle single-line comments
 				if (pos + 1 < input.size() && input[pos] == '/' && input[pos + 1] == '/') {
 					pos += 2;
 					column_number += 2;
@@ -1035,7 +1104,7 @@ namespace parse {
 					continue;
 				}
 
-				// ºÏ≤È∂‡––◊¢ Õ
+				// Handle multi-line comments
 				if (pos + 1 < input.size() && input[pos] == '/' && input[pos + 1] == '*') {
 					pos += 2;
 					column_number += 2;
@@ -1058,11 +1127,12 @@ namespace parse {
 					continue;
 				}
 
-				// ≤ª «ø’∞◊ªÚ◊¢ Õ£¨ÕÀ≥ˆ—≠ª∑
+				// Exit when non-whitespace, non-comment content is found
 				break;
 			}
 		}
 
+		/* Adds an error message to the error collection */
 		void add_error(const std::string& message) {
 			std::string error_msg = "Line " + std::to_string(line_number) +
 				", Column " + std::to_string(column_number) +
@@ -1072,7 +1142,9 @@ namespace parse {
 		}
 
 	public:
+		/* Constructor that initializes the lexer with default token patterns */
 		lexer() {
+			// Add token patterns for common programming language constructs
 			add_token_pattern("\\bint\\b", parse::symbol_t("int", parse::symbol_type_t::TERMINAL));
 			add_token_pattern("\\bfloat\\b", parse::symbol_t("float", parse::symbol_type_t::TERMINAL));
 			add_token_pattern("\\bchar\\b", parse::symbol_t("char", parse::symbol_type_t::TERMINAL));
@@ -1108,6 +1180,7 @@ namespace parse {
 			add_token_pattern("\\,", parse::symbol_t(",", parse::symbol_type_t::TERMINAL));
 		}
 
+		/* Adds a token pattern to the lexer */
 		void add_token_pattern(const std::string& pattern, const parse::symbol_t& symbol) {
 			try {
 				token_patterns.emplace_back(std::regex(pattern), symbol);
@@ -1117,50 +1190,53 @@ namespace parse {
 			}
 		}
 
-		//void print_token_patterns() const {
-		//	std::cout << "Token Patterns:\n";
-		//	for (const auto& pattern : token_patterns) {
-		//		std::cout << "  " << pattern.second.name << " : " << pattern.first.str() << "\n";
-		//	}
-		//}
-
-
+		/* Tokenizes an input string into a sequence of tokens */
 		std::vector<std::pair<parse::symbol_t, std::string>> tokenize(const std::string& input);
 	};
 
+	/*
+	 * LALR(1) parser class that uses the grammar and ACTION/GOTO tables to parse input
+	 *
+	 * This class implements the LALR(1) parsing algorithm using a stack-based approach
+	 * and provides error reporting and recovery mechanisms.
+	 */
 	class lr_parser {
-
-
 	private:
+		std::stack<item_set_id_t> state_stack;        // Stack of parser states
+		std::stack<parse::symbol_t> symbol_stack;     // Stack of symbols
 
-		std::stack<item_set_id_t> state_stack;
-		std::stack<parse::symbol_t> symbol_stack;
-	
-
-		std::vector<std::string> parse_history;
-		std::vector<std::string> error_msg;
+		std::vector<std::string> parse_history;       // History of parsing actions
+		std::vector<std::string> error_msg;           // Collection of error messages
 
 	public:
+		std::unique_ptr<parse::lalr_grammar> grammar;  // The grammar used for parsing
 
-		std::unique_ptr<parse::grammar> grammar;
-
-		lr_parser(std::unique_ptr<parse::grammar> g) {
+		/* Constructor that takes a grammar and builds the parsing tables */
+		lr_parser(std::unique_ptr<parse::lalr_grammar> g) {
 			grammar = std::move(g);
 			grammar->build();
-			state_stack.push(0);
+			state_stack.push(0);  // Start with initial state
 		}
 
+		/* Structure to hold the result of a parsing operation */
 		struct parse_result {
-			bool success;
-			std::string error_message;
-			std::vector<std::string> parse_history;
+			bool success = false;                 // Whether parsing was successful
+			std::string error_message;            // Error message if parsing failed
+			std::vector<std::string> parse_history;  // History of parsing actions
 		};
 
+		/* Parses a sequence of tokens and returns the result */
 		parse_result parse(const std::vector<std::pair<parse::symbol_t, std::string>>& input_tokens);
+
+		/* Returns the collection of error messages */
 		const std::vector<std::string>& get_error() const { return error_msg; }
+
+		/* Returns the parsing history */
 		const std::vector<std::string>& get_parse_history() const {
 			return parse_history;
 		}
+
+		/* Converts the parsing history to a string */
 		const std::string parse_history_to_string() const {
 			std::string result;
 			for (const auto& info : parse_history) {
@@ -1170,6 +1246,7 @@ namespace parse {
 		}
 
 	private:
+		/* Attempts to recover from a parsing error */
 		bool error_recovery(
 			std::stack<int>& state_stack,
 			std::stack<parse::symbol_t>& symbol_stack,
@@ -1177,7 +1254,10 @@ namespace parse {
 			size_t& token_index
 		);
 
+		/* Adds an error message to the error collection */
 		void add_error(const std::string& message);
+
+		/* Executes semantic actions associated with productions */
 		std::any execute_semantic_action(
 			const parse::production_t& prod,
 			const std::vector<std::any>& children
@@ -1198,6 +1278,6 @@ namespace parse {
 //	};
 //}
 
-std::unique_ptr<parse::grammar> grammar_parser(const std::string& filename);
+std::unique_ptr<parse::lalr_grammar> grammar_parser(const std::string& filename);
 
 #endif  // __LR_PARSER_H__

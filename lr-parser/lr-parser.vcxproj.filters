@@ -24,6 +24,12 @@
     <ClCompile Include="lr_parser.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
+    <ClCompile Include="grammar_parser.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="lalr.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="lr_parser.h">
