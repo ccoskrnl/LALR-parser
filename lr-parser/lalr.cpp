@@ -44,7 +44,7 @@ void parse::lalr_grammar::comp_first_sets() {
 				{
 					const parse::symbol_t& sym = prod->right[i];
 
-					if (sym.type == parse::symbol_type_t::TERMINAL) {
+					if (sym.type == parse::symbol_type_t::TERMINAL || sym.type == parse::symbol_type_t::EPSILON) {
 						// If it's a terminal, add it to the FIRST set
 						if (first_sets[left].insert(sym).second) {
 							// extract the boolean result of insert 
@@ -58,7 +58,7 @@ void parse::lalr_grammar::comp_first_sets() {
 					{
 						// non-terminal, add its FIRST set, excluding epsilon
 						for (const auto& first_sym : first_sets[sym]) {
-							if (first_sym.name != epsilon.name) {
+							if (first_sym != epsilon) {
 								if (first_sets[left].insert(first_sym).second) {
 									changed = true;
 								}
@@ -175,38 +175,83 @@ std::shared_ptr<parse::lalr1_item_set> parse::lalr_grammar::closure(const parse:
 
 			if (next_sym.type == parse::symbol_type_t::NON_TERMINAL && !next_sym.name.empty()) {
 
+				// add new items for each production of next_sym
+				std::vector<std::shared_ptr<parse::production_t>> prods = get_productions_for(next_sym);
+
+
 				// compute beta a (the right part after the non-terminal and the lookaheads)
 				std::vector<parse::symbol_t> beta_a;
 				for (int i = item.dot_pos + 1; i < item.product->right.size(); i++) {
 					beta_a.push_back(item.product->right[i]);
 				}
-
 				// compute FIRST(beta a)
 				std::unordered_set<parse::symbol_t, parse::symbol_hasher> lookaheads =
 					comp_first_of_sequence(beta_a, item.lookaheads);
-
 				// merge with existing lookaheads
 				lookaheads.insert(item.lookaheads.begin(), item.lookaheads.end());
 
-				// add new items for each production of next_sym
-				std::vector<std::shared_ptr<parse::production_t>> prods = get_productions_for(next_sym);
+
 
 				for (const std::shared_ptr<parse::production_t> prod : prods) {
 
-					parse::lalr1_item_t new_item(prod, 0, lookaheads);
+					int next_sym_prod_dot_pos = 0;
+					bool all_can_derive_epsilon = true;
 
-					const lalr1_item_t* existing_item = new_I->find_item(new_item.id);
+					while (next_sym_prod_dot_pos < prod->right.size() && all_can_derive_epsilon) {
+						parse::symbol_t current_sym = prod->right[next_sym_prod_dot_pos];
+						parse::lalr1_item_t new_item(prod, next_sym_prod_dot_pos, lookaheads);
 
-					if (existing_item != nullptr) {
+						const lalr1_item_t* existing_item = new_I->find_item_by_id(new_item.id);
+						if (existing_item != nullptr) {
 
-						// Item with same core exists, merge lookaheads
-						changed = new_I->add_lookaheads_for_item(new_item.id, lookaheads);
+							// Item with same core exists, merge lookaheads
+							new_I->add_lookaheads_for_item(new_item.id, lookaheads);
 
-					}
-					else {
-						// New item, simply add it
-						new_I->items.insert(new_item);
-						changed = true;
+						}
+						else {
+							// New item, simply add it
+							//new_I->items.insert(new_item);
+							new_I->add_items(new_item);
+							changed = true;
+						}
+
+						if (current_sym.type != parse::symbol_type_t::NON_TERMINAL) {
+							all_can_derive_epsilon = false;
+							break;
+						}
+
+						bool can_derive_epsilon = false;
+						if (first_sets.count(current_sym)) {
+							const auto& current_sym_first_sym = first_sets.at(current_sym);
+
+							if (current_sym_first_sym.find(epsilon) != current_sym_first_sym.end()) {
+								can_derive_epsilon = true;
+
+								std::vector<std::shared_ptr<parse::production_t>> sub_prods = get_productions_for(current_sym);
+								for (const auto& sub_prod : sub_prods) {
+									parse::lalr1_item_t sub_new_item(sub_prod, 0, lookaheads);
+
+									const parse::lalr1_item_t* found = new_I->find_item_by_id(sub_new_item.id);
+									if (found == nullptr) {
+										new_I->add_items(sub_new_item);
+										changed = true;
+									}
+									else
+									{
+										new_I->add_lookaheads_for_item(sub_new_item.id, lookaheads);
+									}
+								}
+
+							}
+						}
+
+						if (!can_derive_epsilon) {
+							all_can_derive_epsilon = false;
+							break;
+						}
+
+
+						next_sym_prod_dot_pos++;
 					}
 
 				}
@@ -260,21 +305,68 @@ std::shared_ptr<parse::lr0_item_set> parse::lalr_grammar::lr0_closure(const lr0_
 			parse::symbol_t next_sym = i.next_symbol();
 
 			if (next_sym.type == parse::symbol_type_t::NON_TERMINAL && !next_sym.name.empty()) {
+
 				// add new items for each production of next_sym
 				std::vector<std::shared_ptr<parse::production_t>> prods = get_productions_for(next_sym);
 				for (auto& prod : prods) {
-					//gram::lr0_item new_item(const_cast<gram::production*>(&prod), 0);
-					parse::lr0_item_t new_item(prod, 0);
 
-					// Check if the new item already exists
+					int next_sym_prod_dot_pos = 0;
+					bool all_can_derive_epsilon = true;
 
-					const parse::lr0_item_t* found = new_I->find_item(new_item);
-					if (found == nullptr) {
-						new_I->add_items(new_item);
-						changed = true;
+					while (next_sym_prod_dot_pos < prod->right.size() && all_can_derive_epsilon) {
+						parse::symbol_t current_sym = prod->right[next_sym_prod_dot_pos];
+
+						parse::lr0_item_t new_item(prod, next_sym_prod_dot_pos);
+
+						// Check if the new item already exists
+						const parse::lr0_item_t* found = new_I->find_item(new_item);
+						if (found == nullptr) {
+							new_I->add_items(new_item);
+							changed = true;
+						}
+
+
+						if (current_sym.type != parse::symbol_type_t::NON_TERMINAL) {
+							all_can_derive_epsilon = false;
+							break;
+						}
+
+						bool can_derive_epsilon = false;
+						if (first_sets.count(current_sym)) {
+							const auto& current_sym_first_sym = first_sets.at(current_sym);
+
+							// Deal with special case when the following non-terminals also can derive epsilon.
+							if (current_sym_first_sym.find(epsilon) != current_sym_first_sym.end()) {
+								can_derive_epsilon = true;
+
+								std::vector<std::shared_ptr<parse::production_t>> sub_prods = get_productions_for(current_sym);
+								for (const auto& sub_prod : sub_prods) {
+
+									parse::lr0_item_t sub_new_item(sub_prod, 0);
+
+									// Check if the new item already exists
+									const parse::lr0_item_t* found = new_I->find_item(sub_new_item);
+									if (found == nullptr) {
+										new_I->add_items(sub_new_item);
+										changed = true;
+									}
+
+								}
+
+							}
+						}
+
+						if (!can_derive_epsilon) {
+							all_can_derive_epsilon = false;
+							break;
+						}
+
+
+						next_sym_prod_dot_pos++;
 					}
 
 				}
+
 			}
 
 		}
@@ -406,7 +498,7 @@ void parse::lalr_grammar::initialize_lalr1_states() {
 	for (const auto& item : (*lr0_states)[0]->get_items()) {
 		if (item.product->id == AUGMENTED_GRAMMAR_PROD_ID) {
 
-			lalr1_item_t start_item(item, { end_marker });
+			lalr1_item_t start_item(item);
 			lalr1_states[0]->add_items(start_item);
 
 			break;
@@ -491,6 +583,13 @@ void parse::lalr_grammar::determine_lookaheads(
 // Computes and propagates lookaheads for all LALR(1) states
 void parse::lalr_grammar::set_lalr1_items_lookaheads()
 {
+
+
+#ifdef __DEBUG__
+	//std::cout << "LALR(1) States Built. Total States: " << lalr1_states.size() << std::endl;
+	//std::cout << lalr1_states_to_string() << std::endl;
+#endif
+
 	// Data structures for tracking lookahead propagation
 	std::unordered_map<std::pair<item_set_id_t, item_id_t>, std::vector<std::pair<item_set_id_t, item_id_t>>, pair_items_state_item_id_hasher> propagation_graph;
 	std::unordered_map<std::pair<item_set_id_t, item_id_t>, std::unordered_set<parse::symbol_t, parse::symbol_hasher>, pair_items_state_item_id_hasher> spontaneous_lookaheads;
@@ -504,11 +603,31 @@ void parse::lalr_grammar::set_lalr1_items_lookaheads()
 			determine_lookaheads(i, X, propagation_graph, spontaneous_lookaheads);
 	}
 
+
 	// Apply spontaneous lookaheads to items
 	for (const auto& spon : spontaneous_lookaheads) {
 		auto [I_id, i_id] = spon.first;
 		lalr1_states[I_id]->add_lookaheads_for_item(i_id, spon.second);
 	}
+
+	item_id_t start_item_id = 0;
+	for (const auto& item : lalr1_states[0]->get_items()) {
+		if (item.product->id == AUGMENTED_GRAMMAR_PROD_ID) {
+			start_item_id = item.id;
+			break;
+		}
+	}
+
+	lalr1_states[0]->add_lookaheads_for_item(start_item_id, { end_marker });
+
+
+
+#ifdef __DEBUG__
+	//std::cout << "LALR(1) States Built. Total States: " << lalr1_states.size() << std::endl;
+	//std::cout << lalr1_states_to_string() << std::endl;
+#endif
+
+
 
 	// Propagate lookaheads until no changes occur
 	bool changed = true;
@@ -523,7 +642,7 @@ void parse::lalr_grammar::set_lalr1_items_lookaheads()
 						item_set_id_t target_set_id = target_pair.first;
 						item_id_t target_item_id = target_pair.second;
 
-						const auto target_item = lalr1_states[target_set_id]->find_item(target_item_id);
+						const auto target_item = lalr1_states[target_set_id]->find_item_by_id(target_item_id);
 						if (!target_item) continue;
 
 						// Collect lookaheads that need to be added

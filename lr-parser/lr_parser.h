@@ -209,6 +209,17 @@ namespace parse {
 			return symbol_t{ "", symbol_type_t::EPSILON };
 		}
 
+		/* Returns the remaining symbols following the dot position */
+		const std::vector<symbol_t> get_remaining_symbols() const {
+			std::vector<symbol_t> remaining_symbols;
+			
+			for (int i = dot_pos; i < product->right.size(); i++) {
+				remaining_symbols.push_back(this->product->right[i]);
+			}
+
+			return remaining_symbols;
+		}
+
 		/* Returns the symbol immediately preceding the dot position */
 		symbol_t current_symbol() const {
 			if (dot_pos > 0)
@@ -565,7 +576,7 @@ namespace parse {
 		 * Returns true if any new lookaheads were added
 		 */
 		bool add_lookaheads_for_item(const item_id_t id, const std::unordered_set<symbol_t, symbol_hasher>& las) {
-			const lalr1_item_t* original_i = find_item(id);
+			const lalr1_item_t* original_i = find_item_by_id(id);
 
 			if (original_i == nullptr)
 				return false;
@@ -595,7 +606,7 @@ namespace parse {
 		}
 
 		/* Finds an item in the set based on its unique ID */
-		const lalr1_item_t* find_item(const item_id_t& id) const {
+		const lalr1_item_t* find_item_by_id(const item_id_t& id) const {
 			for (const auto& item : items) {
 				if (id == item.id)
 					return &item;

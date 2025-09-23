@@ -4,7 +4,9 @@ Stmt       -> AssignStmt | ExprStmt
 AssignStmt -> id = Expr ;
 ExprStmt   -> Expr ;
 
-Expr -> Term      | Expr + Term      | Expr - Term      | Expr * Factor       | Expr / Factor       | Term * Factor     | Term / Factor 
-
-Term -> Factor     | Term * Factor      | Term / Factor
-Factor -> id     | int_lit      | float_lit       | ( Expr )
+Expr -> AdditiveExpr
+AdditiveExpr -> MultiplicativeExpr AdditiveExprRest
+AdditiveExprRest -> + MultiplicativeExpr AdditiveExprRest | - MultiplicativeExpr AdditiveExprRest | epsilon
+MultiplicativeExpr -> Factor MultiplicativeExprRest
+MultiplicativeExprRest -> * Factor MultiplicativeExprRest | / Factor MultiplicativeExprRest | epsilon
+Factor -> int_lit | id | float_lit

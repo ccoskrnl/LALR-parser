@@ -1,6 +1,5 @@
 S -> A
-A -> id = E | E
-E -> E + T | E - T | T
-T -> T * F | T / F | F
-F -> F ( ArgList ) | ( E ) | id | num
-ArgList -> E | ArgList , E
+A -> A B C D | epsilon
+B -> id B | epsilon
+C -> int_lit C | epsilon
+D -> float_lit D | epsilon
