@@ -1,5 +1,17 @@
-S -> A
-A -> A B C D | epsilon
-B -> id B | epsilon
-C -> int_lit C | epsilon
-D -> float_lit D | epsilon
+Expression -> Assignment-Expression Assignment-Expression-Trait
+
+Assignment-Expression -> Conditional-Expression | Assignment-Expression-Prime
+Assignment-Expression-Prime -> Unary-Expression Assign-Operator Assignment-Expression
+Assignment-Expression-Trait -> , Assignment-Expression | epsilon
+Assign-Operator -> = 
+
+Conditional-Expression -> Binary-Expression
+Binary-Expression -> Unary-Expression Unary-Expression-Trait
+Unary-Expression -> Postfix-Expression | Unary-Operator Unary-Expression
+Unary-Expression-Trait -> Binary-Operator Unary-Expression | epsilon
+
+Postfix-Expression -> Primary-Expression 
+
+Unary-Operator -> ++ | -- | & | * | + | - | ~ | !
+Binary-Operator -> + | - | * | / | %
+Primary-Expression -> id | int_lit | float_lit

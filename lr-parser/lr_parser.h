@@ -752,6 +752,21 @@ namespace parse {
 		std::shared_ptr<lalr1_item_set> closure(const lalr1_item_set& I);  // Computes LALR(1) closure
 		std::shared_ptr<lalr1_item_set> go_to(const lalr1_item_set& I, const symbol_t& X);  // Computes LALR(1) GOTO
 
+		const bool can_derive_epsilon(const symbol_t& non_terminal) const {
+			if (non_terminal.type != symbol_type_t::NON_TERMINAL)
+				return false;
+
+
+			if (first_sets.count(non_terminal)) {
+				const auto& current_sym_first_sym = first_sets.at(non_terminal);
+
+				// Deal with special case when the following non-terminals also can derive epsilon.
+				return current_sym_first_sym.find(epsilon) != current_sym_first_sym.end();
+			}
+
+			return false;
+		}
+
 		void comp_first_sets();  // Computes FIRST sets for all symbols
 		std::unordered_set<symbol_t, symbol_hasher> comp_first_of_sequence(  // Computes FIRST set for a sequence
 			const std::vector<symbol_t>& sequence,

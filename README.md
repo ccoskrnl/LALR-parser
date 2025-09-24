@@ -21,6 +21,35 @@ R -> L
 
 ## 使用
 
+设计一个优雅无冲突的文法是一个非常复杂的工作，在使用语法分析器生成器（例如Yacc/Bison）之前，请仔细检查你的文法。
+
+下面展示了一个C语言风格的表达式文法的示例：
+```
+Expression -> Assignment-Expression Assignment-Expression-Trait
+
+Assignment-Expression -> Conditional-Expression | Assignment-Expression-Prime
+Assignment-Expression-Prime -> Unary-Expression Assign-Operator Assignment-Expression
+Assignment-Expression-Trait -> , Assignment-Expression | epsilon
+Assign-Operator -> = 
+
+Conditional-Expression -> Binary-Expression
+Binary-Expression -> Unary-Expression Unary-Expression-Trait
+Unary-Expression -> Postfix-Expression | Unary-Operator Unary-Expression
+Unary-Expression-Trait -> Binary-Operator Unary-Expression | epsilon
+
+Postfix-Expression -> Primary-Expression 
+
+Unary-Operator -> ++ | -- | & | * | + | - | ~ | !
+Binary-Operator -> + | - | * | / | %
+Primary-Expression -> id | int_lit | float_lit
+```
+
+它可以解析 `a = b`，`a = b + 3` 等字符串。
+
+**有冲突的文法**
+
+由于该LALR文法分析器生成器并不提供符号优先级的功能，所以在设计文法的时候一定要避免 `归约` 和 `移入` 冲突。
+
 虽然改语法分析器生成器可以处理左递归和空表达式(epsilon)，但是对于移进 `规约-冲突` 仍然无能为力。考虑下面这段文法：
 ```bnf
 AssignStmt -> id = Expr ;

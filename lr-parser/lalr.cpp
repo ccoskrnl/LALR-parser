@@ -271,7 +271,7 @@ std::shared_ptr<parse::lalr1_item_set> parse::lalr_grammar::closure(const parse:
 std::shared_ptr<parse::lalr1_item_set> parse::lalr_grammar::go_to(const lalr1_item_set& I, const symbol_t& X)
 {
 
-	std::shared_ptr<lalr1_item_set> new_set = std::make_shared<lalr1_item_set>();
+	lalr1_item_set new_set = lalr1_item_set();
 
 	for (const auto& item : I.items) {
 
@@ -280,11 +280,30 @@ std::shared_ptr<parse::lalr1_item_set> parse::lalr_grammar::go_to(const lalr1_it
 		if (item.dot_pos < item.product->right.size() &&
 			item.next_symbol() == X) {
 			parse::lalr1_item_t moved_item(item.product, item.dot_pos + 1, item.lookaheads);
-			new_set->items.insert(moved_item);
+			new_set.add_items(moved_item);
 		}
+
+		//// skip epsilon
+		//int pos = item.get_dot_pos();
+		//while (pos < item.product->right.size()) {
+		//	symbol_t current = item.product->right[pos];
+
+		//	if (current.type == symbol_type_t::NON_TERMINAL && can_derive_epsilon(current)) {
+		//		pos++;
+
+		//		if (pos < item.product->right.size() && item.product->right[pos] == X) {
+		//			lalr1_item_t new_item(item.product, pos + 1, item.lookaheads);
+		//			new_set.add_items(new_item);
+		//		}
+		//	}
+		//	else
+		//	{
+		//		break;
+		//	}
+		//}
 	}
 
-	return closure(*new_set);
+	return closure(new_set);
 
 }
 
@@ -391,6 +410,25 @@ std::shared_ptr<parse::lr0_item_set> parse::lalr_grammar::lr0_go_to(const lr0_it
 			parse::lr0_item_t moved_item(item.product, item.dot_pos + 1);
 			result.add_items(moved_item);
 		}
+
+		//// skip epsilon
+		//int pos = item.get_dot_pos();
+		//while (pos < item.product->right.size()) {
+		//	symbol_t current = item.product->right[pos];
+
+		//	if (current.type == symbol_type_t::NON_TERMINAL && can_derive_epsilon(current)) {
+		//		pos++;
+
+		//		if (pos < item.product->right.size() && item.product->right[pos] == X) {
+		//			lalr1_item_t new_item(item.product, pos + 1);
+		//			result.add_items(new_item);
+		//		}
+		//	}
+		//	else
+		//	{
+		//		break;
+		//	}
+		//}
 	}
 
 	return lr0_closure(result);
@@ -425,10 +463,24 @@ std::unique_ptr<std::vector<std::shared_ptr<parse::lr0_item_set>>> parse::lalr_g
 		// Collect all symbols that can be transitioned on from current state
 		std::unordered_set<parse::symbol_t, parse::symbol_hasher> transition_symbols;
 		for (const auto& item : current_set->get_items()) {
-			parse::symbol_t next_sym = item.next_symbol();
 
-			if (!next_sym.name.empty()) { 
-				transition_symbols.insert(next_sym);
+			int dot_pos = item.dot_pos;
+			while (dot_pos < item.product->right.size()) {
+				parse::symbol_t next_sym = item.product->right[dot_pos];
+				if (next_sym.type == parse::symbol_type_t::TERMINAL) {
+					transition_symbols.insert(next_sym);
+					break;
+				}
+
+				if (next_sym.type == parse::symbol_type_t::NON_TERMINAL) {
+					transition_symbols.insert(next_sym);
+
+					if (!can_derive_epsilon(next_sym))
+						break;
+				}
+
+				dot_pos++;
+				
 			}
 		}
 
@@ -461,6 +513,51 @@ std::unique_ptr<std::vector<std::shared_ptr<parse::lr0_item_set>>> parse::lalr_g
 			goto_table[{current_set->id, symbol}] = existing_id;
 		}
 	}
+
+	// construct goto_table
+	//for (const auto& I : *lr0_states) {
+
+	//	for (const auto& nt : non_terminals) {
+	//		if (goto_table.count({ I->id, nt }) == 0) {
+	//			const auto& goto_set = lr0_go_to(*I, nt);
+	//			item_set_id_t existing_id = -1;
+
+	//			for (const auto& state : *lr0_states) {
+	//				if (*state == *goto_set) {
+	//					existing_id = state->id;
+	//					break;
+	//				}
+	//			}
+
+	//			if (existing_id != -1) {
+	//				goto_table[{I->id, nt}] = existing_id;
+	//			}
+
+	//		}
+
+	//	}
+
+	//	for (const auto& t : terminals) {
+	//		if (goto_table.count({ I->id, t }) == 0) {
+	//			const auto& goto_set = lr0_go_to(*I, t);
+	//			item_set_id_t existing_id = -1;
+
+	//			for (const auto& state : *lr0_states) {
+	//				if (*state == *goto_set) {
+	//					existing_id = state->id;
+	//					break;
+	//				}
+	//			}
+
+	//			if (existing_id != -1) {
+	//				goto_table[{I->id, t}] = existing_id;
+	//			}
+
+	//		}
+
+	//	}
+
+	//}
 
 	// Debug output: print states and GOTO table
 
@@ -685,7 +782,7 @@ void parse::lalr_grammar::build_action_table()
 			auto& prod = item.product;
 
 			// Handle reduce actions (dot at end of production)
-			if (item.dot_pos >= prod->right.size()) {
+			if (item.dot_pos >= prod->right.size() || (prod->right.size() == 1 && prod->right[0] == epsilon && item.dot_pos == 0)) {
 				for (auto& la : item.lookaheads) {
 					// Check for conflicts with existing actions
 					if (action_table[i].count(la)) {
@@ -728,6 +825,7 @@ void parse::lalr_grammar::build_action_table()
 							if (action_table[i].count(next_symbol)) {
 								auto& existing_action = action_table[i][next_symbol];
 								if (!(existing_action.type == parser_action_type_t::SHIFT && existing_action.value == next_state)) {
+
 									std::cerr << (existing_action.type != parser_action_type_t::SHIFT ? "Reduce" : "Shift")
 										<< "-Shift conflict at state " << i
 										<< " on symbol " << next_symbol.name
